@@ -1,0 +1,26 @@
+[package]
+name = "from-request-derive"
+version = "0.0.0"
+authors = ["Jonas Schievink <jonasschievink@gmail.com>"]
+description = """
+Custom derives for the `from-request` crate.
+
+You should never use this crate directly. It does not expose a stable API and
+may break at any time. Use `from-request` directly instead.
+"""
+documentation = "https://docs.rs/from-request/"
+repository = "https://github.com/1aim/from-request.git"
+license = "CC0-1.0"
+edition = "2018"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "0.15.26"
+synstructure = "0.10.1"
+proc-macro2 = "0.4.27"
+quote = "0.6.11"
+regex-syntax = "0.6.5"
+regex = "1.1.0"
+indexmap = "1.0.2"
