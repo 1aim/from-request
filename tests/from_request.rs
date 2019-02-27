@@ -65,18 +65,39 @@ fn test() {
     assert_impls::<Request>();
 }
 
+/// Tests that `#[context]` can be used to change the context accepted by the
+/// `FromRequest` impl. It should still be possible to use guards that take a
+/// `NoContext` instead.
 #[test]
 fn context() {
     #[derive(FromRequest)]
-    #[context(MyContext)]
+    #[context(SpecialContext)]
+    #[allow(dead_code)]
     enum Routes {
         #[get("/")]
-        Variant {},
+        Variant {
+            /// Takes a `SpecialContext`.
+            special: SpecialGuard,
+            /// Takes a `NoContext`.
+            normal: MyGuard,
+        },
     }
 
     #[derive(RequestContext)]
     #[allow(dead_code)]
-    struct MyContext;
+    struct SpecialContext;
+
+    struct SpecialGuard;
+
+    impl Guard for SpecialGuard {
+        type Context = SpecialContext;
+
+        type Result = Result<Self, BoxedError>;
+
+        fn from_request(_request: &http::Request<()>, _context: &Self::Context) -> Self::Result {
+            Ok(SpecialGuard)
+        }
+    }
 }
 
 /// Overlapping paths are accepted and the variant that was declared first is
