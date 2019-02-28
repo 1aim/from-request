@@ -237,9 +237,6 @@ pub struct Route {
     /// The regular expression matching the path pattern. Captures all path
     /// segments that correspond to placeholders (`:thing`).
     regex: Regex,
-    /// Index of the path matching regex in the global `PathMap`. Starts out as
-    /// 0 and is populated later.
-    regex_index: usize,
     /// Placeholder field names.
     ///
     /// These must exist in the variant that carries this attribute, and their
@@ -319,7 +316,6 @@ impl Route {
                     method: Ident::new(&method.to_string().to_uppercase(), Span::call_site()),
                     raw_path: path,
                     regex: Regex::new(&regex).expect("FromRequest derive created invalid regex"),
-                    regex_index: 0,
                     placeholders,
                     placeholders_sorted,
                 }
@@ -354,8 +350,7 @@ impl PathMap {
                 match route_map.entry(route.method.clone()) {
                     Entry::Vacant(v) => {
                         // Map this path regex and method to the variant it was placed on:
-                        let mut route = route.clone();
-                        route.regex_index = regex_index;
+                        let route = route.clone();
 
                         if regexes.len() == regex_index {
                             regexes.push((route.regex.clone(), !route.placeholders.is_empty()));
@@ -378,25 +373,37 @@ impl PathMap {
         Self { regex_map }
     }
 
-    /// Returns an iterator over all unique regexes in this map.
-    pub fn regexes(&self) -> impl Iterator<Item = &Regex> {
-        self.regex_map.keys().map(|k| k.as_ref())
+    /// Returns an iterator over all unique paths in this map.
+    pub fn paths(&self) -> impl Iterator<Item = PathInfo> {
+        self.regex_map.iter().map(|(regex, method_map)| PathInfo {
+            regex: regex.as_ref(),
+            method_map,
+        })
+    }
+}
+
+pub struct PathInfo<'a> {
+    regex: &'a Regex,
+    method_map: &'a IndexMap<Ident, (VariantData, Route)>,
+}
+
+impl<'a> PathInfo<'a> {
+    /// Returns the regex used to match this path.
+    pub fn regex(&self) -> &'a Regex {
+        &self.regex
     }
 
-    /// Returns an iterator over all possible pairs of regexes and HTTP methods
-    /// mapping to a variant name.
+    /// Returns an iterator over all valid methods at this path.
     ///
-    /// The returned iterator will yield items of type
-    /// `(usize, &Ident, &VariantData)` where:
-    ///
-    /// * **`usize`** is the index of the matched regex in `self.regexes()`.
-    /// * **`&Ident`** is the uppercase HTTP method (as in `http::method::XXX`).
-    /// * **`&VariantData`** describes the variant that should be constructed.
-    pub fn iter_indices(&self) -> impl Iterator<Item = (usize, &Ident, &VariantData)> {
-        self.regex_map
-            .iter()
-            .enumerate()
-            .flat_map(|(i, (_, method_map))| method_map.iter().map(move |(k, v)| (i, k, &v.0)))
+    /// Note that since paths can overlap, this isn't necessarily the full set
+    /// of idents (FIXME).
+    pub fn methods(&self) -> impl Iterator<Item = &'a Ident> {
+        self.method_map.keys()
+    }
+
+    /// Returns an iterator over the `Method => Variant` mappings.
+    pub fn method_map(&self) -> impl Iterator<Item = (&'a Ident, &'a VariantData)> {
+        self.method_map.iter().map(|(k, v)| (k, &v.0))
     }
 }
 

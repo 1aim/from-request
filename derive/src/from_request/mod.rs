@@ -69,6 +69,7 @@ mod parse;
 use self::parse::{ItemData, PathMap, VariantData};
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
+use std::iter;
 use syn::Variant;
 
 pub fn derive_from_request(s: synstructure::Structure) -> TokenStream {
@@ -102,19 +103,20 @@ pub fn derive_from_request(s: synstructure::Structure) -> TokenStream {
         .collect::<Vec<_>>();
     let pathmap = PathMap::build(&variant_data);
     let all_regexes = pathmap
-        .regexes()
-        .map(|r| r.as_str().to_string())
+        .paths()
+        .map(|p| p.regex().as_str().to_string())
         .collect::<Vec<_>>();
 
-    if pathmap.regexes().next().is_none() {
+    if pathmap.paths().next().is_none() {
         // No route attributes. This situation would lead to "cannot infer type
         // for `T`" errors.
         panic!("at least one route attribute must be used");
     }
 
     let capturing_regexes = pathmap
-        .regexes()
-        .map(|regex| {
+        .paths()
+        .map(|path| {
+            let regex = path.regex();
             if regex.captures_len() > 0 {
                 // Captures something, so we need to store it separately
                 let r = regex.as_str();
@@ -139,12 +141,15 @@ pub fn derive_from_request(s: synstructure::Structure) -> TokenStream {
     let variants = &variants;
 
     let regex_match_arms = pathmap
-        .iter_indices()
-        .map(|(i, method, variant)| {
-            let variant = &variant.variant_name();
-            quote! {
-                (#i, &http::Method::#method) => Variants::#variant,
-            }
+        .paths()
+        .enumerate()
+        .flat_map(|(i, pathinfo)| {
+            pathinfo.method_map().map(move |(method, variant)| {
+                let variant = &variant.variant_name();
+                quote! {
+                    (#i, &http::Method::#method) => Variants::#variant,
+                }
+            })
         })
         .collect::<Vec<_>>();
 

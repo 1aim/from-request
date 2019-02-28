@@ -8,14 +8,14 @@ pub struct ByProxy<T, H: ?Sized> {
 }
 
 impl<T, H: Hash + ?Sized> ByProxy<T, H> {
-    /// Creates a new `HashWith` adapter storing `object`.
+    /// Creates a new `ByProxy` adapter storing `object`.
     ///
-    /// The returned `Self` will implement `Hash` by calling `to_hash` and
-    /// hashing the returned object.
-    pub fn new(object: T, to_hash: for<'a> fn(&'a T) -> &'a H) -> Self {
+    /// The returned `Self` will implement `Hash` and `PartialEq` by calling
+    /// `to_proxy` and forwarding to the returned object.
+    pub fn new(object: T, to_proxy: for<'a> fn(&'a T) -> &'a H) -> Self {
         Self {
             object,
-            tf: to_hash,
+            tf: to_proxy,
         }
     }
 }
