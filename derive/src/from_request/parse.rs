@@ -475,9 +475,6 @@ impl PathSegment {
 
                 PathSegment::Placeholder(Ident::new(inner, Span::call_site()))
             }
-        } else if segment.starts_with("\\{") {
-            // escaped `{`: remove `\`, keep `{`
-            PathSegment::Literal(segment[1..].into())
         } else {
             // literal
             PathSegment::Literal(segment)

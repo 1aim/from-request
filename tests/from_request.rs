@@ -198,12 +198,3 @@ fn any_placeholder() {
         },
     }
 }
-
-#[test]
-fn placeholder_escape() {
-    #[derive(FromRequest)]
-    enum Routes {
-        #[get("/\\{ph}/\\{rest...}")]
-        Variant,
-    }
-}
