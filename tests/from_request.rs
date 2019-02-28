@@ -94,7 +94,7 @@ fn test() {
     }
 
     let login = invoke::<Routes>(
-        Request::post("https://example.com/login")
+        Request::post("/login")
             .body(
                 r#"
                 {
@@ -121,7 +121,7 @@ fn test() {
 
 
     let get_login = invoke::<Routes>(
-        Request::get("https://example.com/login")
+        Request::get("/login")
             .body(Body::empty())
             .unwrap(),
     );
@@ -131,7 +131,7 @@ fn test() {
 
 
     let post_user = invoke::<Routes>(
-        Request::post("https://example.com/users/0")
+        Request::post("/users/0")
             .body(Body::empty())
             .unwrap(),
     );
@@ -141,7 +141,7 @@ fn test() {
 
 
     let user = invoke::<Routes>(
-        Request::get("https://example.com/users/wrong")
+        Request::get("/users/wrong")
             .body(Body::empty())
             .unwrap(),
     );
