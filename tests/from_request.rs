@@ -208,3 +208,24 @@ fn any_placeholder() {
         }
     }
 }
+
+#[test]
+fn asterisk() {
+    #[derive(FromRequest, Debug)]
+    enum Routes {
+        #[options("*")]
+        ServerOptions,
+    }
+
+    invoke::<Routes>(
+        Request::options("*")
+            .body(Body::empty())
+            .unwrap(),
+    ).unwrap();
+
+    invoke::<Routes>(
+        Request::options("/")
+            .body(Body::empty())
+            .unwrap(),
+    ).unwrap_err();
+}

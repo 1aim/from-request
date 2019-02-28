@@ -292,6 +292,9 @@ pub struct RoutePath {
     /// segments that correspond to placeholders (`{thing}`).
     regex: Regex,
     /// The segments making up the path.
+    ///
+    /// If empty, this is the asterisk path `*`, which is different from all
+    /// regular paths.
     segments: Vec<PathSegment>,
     /// Placeholder field names.
     ///
@@ -307,6 +310,16 @@ pub struct RoutePath {
 
 impl RoutePath {
     fn parse(path: String) -> Self {
+        if path == "*" {
+            return Self {
+                raw: path,
+                regex: Regex::new("\\*").unwrap(),
+                segments: Vec::new(),
+                placeholders: Vec::new(),
+                placeholders_sorted: Vec::new(),
+            };
+        }
+
         // Require paths to start with `/` to make them unambiguous.
         // They may or may not end with `/` - both ways refer to
         // different resources.
@@ -365,6 +378,15 @@ impl RoutePath {
     /// Tries to find a route that can be matched by both `self` and `other`.
     pub fn find_overlap(&self, other: &Self) -> Option<String> {
         use self::PathSegment::*;
+
+        if self.segments.is_empty() {
+            // self is "*"
+            if other.segments.is_empty() {
+                return Some("*".into());
+            } else {
+                return None;
+            }
+        }
 
         let mut overlap = String::new();
         let mut saw_rest = false;
@@ -643,5 +665,8 @@ mod tests {
         assert_eq!(intersect!("/lit/bla", "/{b...}"), Some("/lit/bla"));
         assert_eq!(intersect!("/lit/bla", "/lit/{b...}"), Some("/lit/bla"));
         assert_eq!(intersect!("/lit/bla", "/blit/{b...}"), None);
+        assert_eq!(intersect!("*", "/{b...}"), None);
+        assert_eq!(intersect!("*", "/"), None);
+        assert_eq!(intersect!("*", "*"), Some("*"));
     }
 }
