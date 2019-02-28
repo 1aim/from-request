@@ -187,14 +187,24 @@ fn context() {
 
 #[test]
 fn any_placeholder() {
-    #[derive(FromRequest)]
+    #[derive(FromRequest, Debug)]
     enum Routes {
         #[get("/{ph}/{rest...}")]
         Variant {
-            #[allow(unused)]
             ph: u32,
-            #[allow(unused)]
             rest: String,
         },
+    }
+
+    let route = invoke::<Routes>(
+        Request::get("/1234/bla/bli?param=123")
+            .body(Body::empty())
+            .unwrap(),
+    ).unwrap();
+    match route {
+        Routes::Variant { ph, rest } => {
+            assert_eq!(ph, 1234);
+            assert_eq!(rest, "bla/bli");
+        }
     }
 }
