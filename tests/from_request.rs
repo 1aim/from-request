@@ -1,7 +1,34 @@
-use from_request::{body::Json, BoxedError, FromRequest, Guard, NoContext, RequestContext};
+use from_request::{
+    body::Json, futures::IntoFuture, http::Request, hyper::Body, BoxedError, FromRequest, Guard,
+    NoContext, RequestContext,
+};
 use serde::Deserialize;
+use tokio::runtime::current_thread::Runtime;
 
-fn assert_impls<T: FromRequest>() {}
+/// Simulates receiving `request`, and decodes a `FromRequest` implementor `T`.
+///
+/// `T` has to take a `NoContext`.
+fn invoke<T>(
+    request: Request<Body>,
+) -> Result<<T::Result as IntoFuture>::Item, <T::Result as IntoFuture>::Error>
+where
+    T: FromRequest<Context = NoContext>,
+{
+    invoke_context::<T>(request, NoContext)
+}
+
+/// Simulates receiving `request`, and decodes a `FromRequest` implementor `T`.
+///
+/// Passes the given context object to `T`'s `FromRequest` implementation.
+fn invoke_context<T: FromRequest>(
+    request: Request<Body>,
+    context: T::Context,
+) -> Result<<T::Result as IntoFuture>::Item, <T::Result as IntoFuture>::Error> {
+    let future = T::from_request(request, context).into_future();
+    Runtime::new()
+        .expect("couldn't create tokio runtime")
+        .block_on(future)
+}
 
 struct MyGuard;
 
@@ -19,7 +46,7 @@ impl Guard for MyGuard {
 fn test() {
     #[derive(FromRequest)]
     #[allow(dead_code)]
-    enum Request {
+    enum Routes {
         #[post("/login")]
         Login {
             #[body]
@@ -62,7 +89,20 @@ fn test() {
         },
     }
 
-    assert_impls::<Request>();
+    invoke::<Routes>(
+        Request::post("https://example.com/login")
+            .body(
+                r#"
+                {
+                    "email": "test@example.com",
+                    "password": "hunter2"
+                }
+                "#
+                .into(),
+            )
+            .unwrap(),
+    )
+    .expect("/login not routed properly");
 }
 
 /// Tests that `#[context]` can be used to change the context accepted by the

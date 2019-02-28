@@ -27,6 +27,7 @@ version = "=0.0.0" # AUTOBUMP
 
 [dev-dependencies]
 version-sync = "0.7"
+tokio = "0.1.15"
 
 [workspace]
 
