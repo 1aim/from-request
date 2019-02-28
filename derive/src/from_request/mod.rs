@@ -79,6 +79,10 @@ pub fn derive_from_request(s: synstructure::Structure) -> TokenStream {
         syn::Data::Enum(en) => en,
     };
 
+    if !s.ast().generics.params.is_empty() {
+        panic!("#[derive(FromRequest)] does not support generic types");
+    }
+
     let item_data = ItemData::parse(&s.ast().attrs);
 
     let context = item_data.context().cloned().unwrap_or_else(|| {
@@ -408,6 +412,21 @@ mod tests {
     fn on_union() {
         expand! {
             union MyStruct {}
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "#[derive(FromRequest)] does not support generic types")]
+    fn generics() {
+        expand! {
+            enum Routes<T> {
+                #[get("/{ph}")]
+                Variant {
+                    ph: u32,
+                    #[body]
+                    body: T,
+                }
+            }
         }
     }
 
