@@ -118,12 +118,12 @@ impl error::Error for Error {
 /// The different kinds of errors that can occur when using this library.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ErrorKind {
-    /// Failed to parse path segment using `FromStr` impl. 400 Bad Request.
-    PathSegment,
     /// Failed to parse query params. 400 Bad Request.
     QueryParam,
     /// Failed to deserialize the body. 400 Bad Request.
     Body,
+    /// Failed to parse path segment using `FromStr` impl. 404 Not Found.
+    PathSegment,
     /// No route matched the request URL. 404 Not Found.
     NoMatchingRoute,
     /// Endpoint doesn't support this method (but does support a different one).
@@ -138,10 +138,8 @@ impl ErrorKind {
     /// Returns the HTTP status code that most closely describes this error.
     pub fn http_status(&self) -> StatusCode {
         match self {
-            ErrorKind::PathSegment | ErrorKind::QueryParam | ErrorKind::Body => {
-                StatusCode::BAD_REQUEST
-            }
-            ErrorKind::NoMatchingRoute => StatusCode::NOT_FOUND,
+            ErrorKind::QueryParam | ErrorKind::Body => StatusCode::BAD_REQUEST,
+            ErrorKind::PathSegment | ErrorKind::NoMatchingRoute => StatusCode::NOT_FOUND,
             ErrorKind::WrongMethod => StatusCode::METHOD_NOT_ALLOWED,
             ErrorKind::__Nonexhaustive => unreachable!("__Nonexhaustive must never exist"),
         }

@@ -1,7 +1,7 @@
 use from_request::{
     body::Json,
     futures::IntoFuture,
-    http::{Method, Request},
+    http::{Method, Request, StatusCode},
     hyper::Body,
     BoxedError, Error, ErrorKind, FromRequest, Guard, NoContext, RequestContext,
 };
@@ -119,6 +119,7 @@ fn test() {
         _ => panic!("unexpected result: {:?}", login),
     }
 
+
     let get_login = invoke::<Routes>(
         Request::get("https://example.com/login")
             .body(Body::empty())
@@ -128,6 +129,7 @@ fn test() {
     assert_eq!(error.kind(), ErrorKind::WrongMethod);
     assert_eq!(error.allowed_methods(), &[&Method::POST]);
 
+
     let post_user = invoke::<Routes>(
         Request::post("https://example.com/users/0")
             .body(Body::empty())
@@ -136,6 +138,16 @@ fn test() {
     let error: Box<Error> = post_user.unwrap_err().downcast().unwrap();
     assert_eq!(error.kind(), ErrorKind::WrongMethod);
     assert_eq!(error.allowed_methods(), &[&Method::GET, &Method::PATCH]);
+
+
+    let user = invoke::<Routes>(
+        Request::get("https://example.com/users/wrong")
+            .body(Body::empty())
+            .unwrap(),
+    );
+    let error: Box<Error> = user.unwrap_err().downcast().unwrap();
+    assert_eq!(error.kind(), ErrorKind::PathSegment);
+    assert_eq!(error.http_status(), StatusCode::NOT_FOUND);
 }
 
 /// Tests that `#[context]` can be used to change the context accepted by the
