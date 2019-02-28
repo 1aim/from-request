@@ -69,7 +69,6 @@ mod parse;
 use self::parse::{ItemData, PathMap, VariantData};
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
-use std::iter;
 use syn::Variant;
 
 pub fn derive_from_request(s: synstructure::Structure) -> TokenStream {
@@ -486,6 +485,8 @@ mod tests {
                 Variant {
                     #[allow(unused)]
                     ph: u32,
+                    #[allow(unused)]
+                    rest: String,
                 },
             }
         }
@@ -499,7 +500,9 @@ mod tests {
                 #[get("/{rest...}/more/{stuff}")]
                 Variant {
                     #[allow(unused)]
-                    ph: u32,
+                    rest: String,
+                    #[allow(unused)]
+                    stuff: String,
                 },
             }
         }
@@ -513,7 +516,25 @@ mod tests {
                 #[get("/{rest...}/more/{stuff...}")]
                 Variant {
                     #[allow(unused)]
-                    ph: u32,
+                    rest: String,
+                    #[allow(unused)]
+                    stuff: String,
+                },
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot mark a field with #[body]")]
+    fn unrouted() {
+        expand! {
+            enum Routes {
+                #[get("/")]
+                Index,
+
+                NoRoute {
+                    #[body]
+                    body: (),
                 },
             }
         }

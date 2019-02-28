@@ -177,7 +177,7 @@ impl VariantData {
                         );
                     }
                     _ if known_attr(&meta.name()) => {
-                        panic!("#[{}] is not valid on enum variants", meta.name());
+                        panic!("#[{}] is not valid on fields", meta.name());
                     }
                     _ => {}
                 }
@@ -197,6 +197,17 @@ impl VariantData {
             }
         }
 
+        // If there's no route, deny all attributes on fields as well
+        if routes.is_empty() {
+            if body_field.is_some() {
+                panic!("cannot mark a field with #[body] when the variant doesn't have a route attribute");
+            }
+
+            if query_params_field.is_some() {
+                panic!("cannot mark a field with #[query_params] when the variant doesn't have a route attribute");
+            }
+        }
+
         Self {
             name: ast.ident.clone(),
             routes,
@@ -210,18 +221,29 @@ impl VariantData {
         &self.name
     }
 
+    /// Returns the parsed route attributes attached to this variant.
+    ///
+    /// This might be empty, in which case the custom derive should just ignore
+    /// the variant.
     pub fn routes(&self) -> &[Route] {
         &self.routes
     }
 
+    /// Returns the name of the field marked with `#[body]`.
+    ///
+    /// If this is `None`, the body is ignored.
     pub fn body_field(&self) -> Option<&Ident> {
         self.body_field.as_ref()
     }
 
+    /// Returns the name of the field marked with `#[query_params]`.
+    ///
+    /// If this is `None`, the query parameters are ignored.
     pub fn query_params_field(&self) -> Option<&Ident> {
         self.query_params_field.as_ref()
     }
 
+    /// Returns the list of fields that store guard objects.
     pub fn guard_fields(&self) -> &[Ident] {
         &self.guard_fields
     }
@@ -391,14 +413,6 @@ impl<'a> PathInfo<'a> {
     /// Returns the regex used to match this path.
     pub fn regex(&self) -> &'a Regex {
         &self.regex
-    }
-
-    /// Returns an iterator over all valid methods at this path.
-    ///
-    /// Note that since paths can overlap, this isn't necessarily the full set
-    /// of idents (FIXME).
-    pub fn methods(&self) -> impl Iterator<Item = &'a Ident> {
-        self.method_map.keys()
     }
 
     /// Returns an iterator over the `Method => Variant` mappings.
