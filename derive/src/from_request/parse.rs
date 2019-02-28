@@ -2,6 +2,7 @@ use crate::utils::ByProxy;
 use indexmap::{map::Entry, IndexMap};
 use proc_macro2::{Ident, Span};
 use regex::Regex;
+use std::slice;
 use syn::{Attribute, Lit, Meta, NestedMeta};
 use synstructure::VariantAst;
 
@@ -59,6 +60,8 @@ impl ItemData {
 pub struct VariantData {
     /// Name of the variant.
     name: Ident,
+    /// The parsed HTTP routes. There's one for each `#[method]`-style attribute
+    /// on the variant.
     routes: Vec<Route>,
     body_field: Option<Ident>,
     query_params_field: Option<Ident>,
@@ -99,14 +102,16 @@ impl VariantData {
         if let Some((first, rest)) = routes.split_first() {
             for route in rest {
                 // order doesn't matter, though
-                if first.placeholders_sorted != route.placeholders_sorted {
+                if first.path.placeholders_sorted != route.path.placeholders_sorted {
                     let first = first
+                        .path
                         .placeholders_sorted
                         .iter()
                         .map(|ident| ident.to_string())
                         .collect::<Vec<_>>()
                         .join(", ");
                     let other = route
+                        .path
                         .placeholders_sorted
                         .iter()
                         .map(|ident| ident.to_string())
@@ -122,7 +127,7 @@ impl VariantData {
 
         let placeholders = routes
             .first()
-            .map(|route| &route.placeholders[..])
+            .map(|route| route.placeholders())
             .unwrap_or(&[]);
 
         // All placeholders must have fields with that name in the variant
@@ -254,11 +259,41 @@ impl VariantData {
 pub struct Route {
     /// Name of the associated constant on `http::Method`.
     method: Ident,
+    path: RoutePath,
+}
+
+impl Route {
+    fn parse(method: Ident, args: &[&NestedMeta]) -> Self {
+        match args {
+            [NestedMeta::Literal(Lit::Str(path))] => {
+                let path = path.value();
+
+                Self {
+                    method: Ident::new(&method.to_string().to_uppercase(), Span::call_site()),
+                    path: RoutePath::parse(path),
+                }
+            }
+            _ => {
+                panic!("route attributes must be of the form `#[method(\"/path/to/match\")]`");
+            }
+        }
+    }
+
+    pub fn placeholders(&self) -> &[Ident] {
+        &self.path.placeholders
+    }
+}
+
+/// A parsed path of an HTTP route.
+#[derive(Clone)]
+pub struct RoutePath {
     /// The original path specified in the attribute.
-    raw_path: String,
+    raw: String,
     /// The regular expression matching the path pattern. Captures all path
-    /// segments that correspond to placeholders (`:thing`).
+    /// segments that correspond to placeholders (`{thing}`).
     regex: Regex,
+    /// The segments making up the path.
+    segments: Vec<PathSegment>,
     /// Placeholder field names.
     ///
     /// These must exist in the variant that carries this attribute, and their
@@ -271,85 +306,192 @@ pub struct Route {
     placeholders_sorted: Vec<Ident>,
 }
 
-impl Route {
-    fn parse(method: Ident, args: &[&NestedMeta]) -> Self {
-        match args {
-            [NestedMeta::Literal(Lit::Str(path))] => {
-                let path = path.value();
+impl RoutePath {
+    fn parse(path: String) -> Self {
+        // Require paths to start with `/` to make them unambiguous.
+        // They may or may not end with `/` - both ways refer to
+        // different resources.
+        if !path.starts_with("/") {
+            panic!("paths of route attributes must start with `/`");
+        }
 
-                // Require paths to start with `/` to make them unambiguous.
-                // They may or may not end with `/` - both ways refer to
-                // different resources.
-                if !path.starts_with("/") {
-                    panic!("paths of route attributes must start with `/`");
-                }
+        let segments = path
+            .split('/')
+            .skip(1)
+            .map(|s| PathSegment::parse(s.into()))
+            .collect::<Vec<_>>();
 
-                let segments = path.split('/').skip(1).collect::<Vec<_>>();
-
-                let mut regex = String::new();
-                let mut placeholders = Vec::new();
-                for (i, segment) in segments.iter().enumerate() {
-                    if segment.starts_with('{') && segment.ends_with('}') {
-                        let inner = &segment[1..segment.len() - 1];
-                        if inner.ends_with("...") {
-                            // "Rest" placeholder capturing *everything*. Only valid at the end.
-                            if i != segments.len() - 1 {
-                                panic!("...-placeholders must not be followed by anything");
-                            }
-
-                            let ident = &inner[..inner.len() - 3];
-                            if !valid_ident(ident) {
-                                panic!("placeholder `{}` must be a valid identifier", inner);
-                            }
-
-                            placeholders.push(Ident::new(ident, Span::call_site()));
-                            regex.push_str("/(.*)");
-                        } else {
-                            // Else the placeholder must be a valid ident that will store a segment
-                            if !valid_ident(inner) {
-                                panic!("placeholder `{}` must be a valid identifier", inner);
-                            }
-
-                            placeholders.push(Ident::new(inner, Span::call_site()));
-                            regex.push_str("/([^/]+)");
-                        }
-                    } else if segment.starts_with("\\{") {
-                        // escaped `{`
-                        regex.push('/');
-                        // remove `\`, keep literal `:`
-                        regex_syntax::escape_into(&segment[1..], &mut regex);
-                    } else {
-                        // literal
-                        regex.push('/');
-                        regex_syntax::escape_into(segment, &mut regex);
+        let mut regex = String::new();
+        let mut placeholders = Vec::new();
+        for (i, segment) in segments.iter().enumerate() {
+            match segment {
+                PathSegment::Rest(ident) => {
+                    // "Rest" placeholder capturing *everything*. Only valid at the end.
+                    if i != segments.len() - 1 {
+                        panic!("...-placeholders must not be followed by anything");
                     }
-                }
 
-                // Need to check that no duplicate placeholders were used
-                let mut placeholders_sorted = placeholders.clone();
-                placeholders_sorted.sort();
-                let before = placeholders_sorted.len();
-                placeholders_sorted.dedup();
-                if placeholders_sorted.len() != before {
-                    panic!("duplicate placeholders in route path `{}`", path);
+                    placeholders.push(ident.clone());
+                    regex.push_str("/(.*)");
                 }
-
-                Self {
-                    method: Ident::new(&method.to_string().to_uppercase(), Span::call_site()),
-                    raw_path: path,
-                    regex: Regex::new(&regex).expect("FromRequest derive created invalid regex"),
-                    placeholders,
-                    placeholders_sorted,
+                PathSegment::Placeholder(ident) => {
+                    placeholders.push(ident.clone());
+                    regex.push_str("/([^/]+)");
+                }
+                PathSegment::Literal(literal) => {
+                    regex.push('/');
+                    regex_syntax::escape_into(literal, &mut regex);
                 }
             }
-            _ => {
-                panic!("route attributes must be of the form `#[method(\"/path/to/match\")]`");
-            }
+        }
+
+        // Need to check that no duplicate placeholders were used
+        let mut placeholders_sorted = placeholders.clone();
+        placeholders_sorted.sort();
+        let before = placeholders_sorted.len();
+        placeholders_sorted.dedup();
+        if placeholders_sorted.len() != before {
+            panic!("duplicate placeholders in route path `{}`", path);
+        }
+
+        Self {
+            raw: path,
+            regex: Regex::new(&regex).expect("FromRequest derive created invalid regex"),
+            segments,
+            placeholders,
+            placeholders_sorted,
         }
     }
 
-    pub fn placeholders(&self) -> &[Ident] {
-        &self.placeholders
+    /// Tries to find a route that can be matched by both `self` and `other`.
+    pub fn find_overlap(&self, other: &Self) -> Option<String> {
+        use self::PathSegment::*;
+
+        let mut overlap = String::new();
+        let mut saw_rest = false;
+        for (a, b) in self.segments_fused().zip(other.segments_fused()) {
+            match (a, b) {
+                // If we reach any `Rest` placeholder there *must* be overlap
+                (Rest(_), Rest(_)) => {
+                    // Here we want to bail early to prevent an infinite loop (also we want the
+                    // shortest counterexample)
+                    overlap.push('/');
+                    overlap.push_str(&a.matching_string());
+                    return Some(overlap);
+                }
+                (Rest(_), other) | (other, Rest(_)) => {
+                    overlap.push('/');
+                    overlap.push_str(&other.matching_string());
+                    saw_rest = true;
+                }
+
+                (Placeholder(a), Placeholder(_)) => {
+                    overlap.push('/');
+                    overlap.push_str(&a.to_string());
+                }
+
+                (Placeholder(_), Literal(lit)) | (Literal(lit), Placeholder(_)) => {
+                    overlap.push('/');
+                    overlap.push_str(&lit);
+                }
+
+                (Literal(a), Literal(b)) => {
+                    if a == b {
+                        overlap.push('/');
+                        overlap.push_str(&a);
+                    } else {
+                        return None;
+                    }
+                }
+            }
+        }
+
+        if self.segments.len() == other.segments.len() || saw_rest {
+            Some(overlap)
+        } else {
+            // Different segment count can only overlap with "rest" placeholders, which is handled
+            // above already
+            None
+        }
+    }
+
+    /// Returns an iterator over the path segments, fusing any "rest" placeholder (`{rest...}`).
+    ///
+    /// If the last placeholder is a "rest" placeholder, it will be yielded indefinitely.
+    fn segments_fused(&self) -> impl Iterator<Item = &PathSegment> {
+        SegmentsFused::Unfused(self.segments.iter())
+    }
+}
+
+enum SegmentsFused<'a> {
+    Unfused(slice::Iter<'a, PathSegment>),
+    Fused(&'a PathSegment),
+}
+
+impl<'a> Iterator for SegmentsFused<'a> {
+    type Item = &'a PathSegment;
+
+    fn next(&mut self) -> Option<&'a PathSegment> {
+        match self {
+            SegmentsFused::Unfused(iter) => match iter.next() {
+                None => None,
+                Some(segment @ PathSegment::Rest(_)) => {
+                    *self = SegmentsFused::Fused(segment);
+                    Some(segment)
+                }
+                Some(other) => Some(other),
+            },
+            SegmentsFused::Fused(segment) => Some(segment),
+        }
+    }
+}
+
+/// Segment of a request path pattern.
+#[derive(Clone)]
+pub enum PathSegment {
+    /// `{ident}`
+    Placeholder(Ident),
+    /// `{ident...}`
+    Rest(Ident),
+    /// `anything else`
+    Literal(String),
+}
+
+impl PathSegment {
+    fn parse(segment: String) -> Self {
+        if segment.starts_with('{') && segment.ends_with('}') {
+            let inner = &segment[1..segment.len() - 1];
+            if inner.ends_with("...") {
+                let ident = &inner[..inner.len() - 3];
+                if !valid_ident(ident) {
+                    panic!("placeholder `{}` must be a valid identifier", inner);
+                }
+
+                PathSegment::Rest(Ident::new(ident, Span::call_site()))
+            } else {
+                // Else the placeholder must be a valid ident that will store a segment
+                if !valid_ident(inner) {
+                    panic!("placeholder `{}` must be a valid identifier", inner);
+                }
+
+                PathSegment::Placeholder(Ident::new(inner, Span::call_site()))
+            }
+        } else if segment.starts_with("\\{") {
+            // escaped `{`: remove `\`, keep `{`
+            PathSegment::Literal(segment[1..].into())
+        } else {
+            // literal
+            PathSegment::Literal(segment)
+        }
+    }
+
+    /// Creates an example path segment that would match `self`.
+    fn matching_string(&self) -> String {
+        match self {
+            PathSegment::Placeholder(ident) => ident.to_string(),
+            PathSegment::Rest(ident) => format!("{}...", ident),
+            PathSegment::Literal(lit) => lit.clone(),
+        }
     }
 }
 
@@ -363,9 +505,24 @@ impl PathMap {
         let mut regexes = Vec::new();
         let mut regex_map = IndexMap::new();
 
+        let mut overlap_map = IndexMap::new();
+
         for variant in variants {
             for route in &variant.routes {
-                let reg = ByProxy::new(route.regex.clone(), Regex::as_str);
+                let routes_for_method = overlap_map
+                    .entry(route.method.clone())
+                    .or_insert_with(Vec::<Route>::new);
+                for prev_route in routes_for_method.iter() {
+                    if let Some(overlap) = prev_route.path.find_overlap(&route.path) {
+                        panic!(
+                            "{}-route `{}` overlaps with previously defined route `{}` (both would match path `{}`)",
+                            route.method, route.path.raw, prev_route.path.raw, overlap
+                        );
+                    }
+                }
+                routes_for_method.push(route.clone());
+
+                let reg = ByProxy::new(route.path.regex.clone(), Regex::as_str);
                 let entry = regex_map.entry(reg);
                 let regex_index = entry.index();
                 let route_map = entry.or_insert_with(IndexMap::new);
@@ -375,7 +532,8 @@ impl PathMap {
                         let route = route.clone();
 
                         if regexes.len() == regex_index {
-                            regexes.push((route.regex.clone(), !route.placeholders.is_empty()));
+                            regexes
+                                .push((route.path.regex.clone(), !route.placeholders().is_empty()));
                         }
 
                         v.insert((variant.clone(), route));
@@ -384,8 +542,8 @@ impl PathMap {
                         // duplicate path declaration
                         let old = old.get();
                         panic!(
-                            "duplicate route: `{}` on `{}` collides with `{}` on `{}`",
-                            old.1.raw_path, old.0.name, route.raw_path, variant.name
+                            "internal error in from-request! duplicate route: `{}` on `{}` collides with `{}` on `{}`. please report a bug.",
+                            old.1.path.raw, old.0.name, route.path.raw, variant.name
                         );
                     }
                 }
@@ -415,7 +573,7 @@ impl<'a> PathInfo<'a> {
         &self.regex
     }
 
-    /// Returns an iterator over the `Method => Variant` mappings.
+    /// Returns an iterator over the `Method => Variant` mappings for this path.
     pub fn method_map(&self) -> impl Iterator<Item = (&'a Ident, &'a VariantData)> {
         self.method_map.iter().map(|(k, v)| (k, &v.0))
     }
@@ -460,5 +618,34 @@ mod tests {
         assert!(!valid_ident(" "));
         assert!(!valid_ident(""));
         assert!(!valid_ident("0abc"));
+    }
+
+    #[test]
+    fn overlap() {
+        macro_rules! intersect {
+            ($a:literal, $b:literal) => {{
+                RoutePath::parse($a.to_string())
+                    .find_overlap(&RoutePath::parse($b.to_string()))
+                    .as_ref()
+                    .map(|s| s.as_str())
+            }};
+        }
+
+        assert_eq!(intersect!("/", "/literal"), None);
+        assert_eq!(intersect!("/", "/"), Some("/"));
+        assert_eq!(intersect!("/a", "/b"), None);
+        assert_eq!(intersect!("/abc", "/abc"), Some("/abc"));
+        assert_eq!(intersect!("/{a}", "/b"), Some("/b"));
+        assert_eq!(intersect!("/a", "/{b}"), Some("/a"));
+        assert_eq!(intersect!("/{a}", "/{b}"), Some("/a"));
+        assert_eq!(intersect!("/{a}/", "/{b}"), None);
+        assert_eq!(intersect!("/{a}/", "/{b}/lit"), None);
+        assert_eq!(intersect!("/{a}/{x}", "/{b}/{y}"), Some("/a/x"));
+        assert_eq!(intersect!("/{a}/{x...}", "/{b}"), None);
+        assert_eq!(intersect!("/{a}/{x...}", "/{b...}"), Some("/a/x..."));
+        assert_eq!(intersect!("/lit/{x...}", "/{b...}"), Some("/lit/x..."));
+        assert_eq!(intersect!("/lit/bla", "/{b...}"), Some("/lit/bla"));
+        assert_eq!(intersect!("/lit/bla", "/lit/{b...}"), Some("/lit/bla"));
+        assert_eq!(intersect!("/lit/bla", "/blit/{b...}"), None);
     }
 }

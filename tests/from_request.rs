@@ -140,23 +140,6 @@ fn context() {
     }
 }
 
-/// Overlapping paths are accepted and the variant that was declared first is
-/// preferred.
-#[test]
-fn overlap() {
-    #[derive(FromRequest)]
-    enum Routes {
-        #[get("/0")]
-        Var {},
-
-        #[get("/{ph}")]
-        Variant {
-            #[allow(unused)]
-            ph: u32,
-        },
-    }
-}
-
 #[test]
 fn any_placeholder() {
     #[derive(FromRequest)]

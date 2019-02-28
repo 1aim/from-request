@@ -464,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "duplicate route")]
+    #[should_panic(expected = "route `/{pl}` overlaps with previously defined route `/{ph}`")]
     fn dup_routes() {
         expand! {
             enum Routes {
@@ -554,6 +554,23 @@ mod tests {
                 NoRoute {
                     #[body]
                     body: (),
+                },
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "route `/{ph}` overlaps with previously defined route `/0`")]
+    fn overlap() {
+        expand! {
+            enum Routes {
+                #[get("/0")]
+                Var {},
+
+                #[get("/{ph}")]
+                Variant {
+                    #[allow(unused)]
+                    ph: u32,
                 },
             }
         }
