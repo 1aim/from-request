@@ -99,26 +99,25 @@ impl VariantData {
 
         // Since you're allowed to put multiple routes on a variant, they all
         // must have the same placeholders.
+        // They also have to be in the same order because we want to access the
+        // captures by index.
         if let Some((first, rest)) = routes.split_first() {
             for route in rest {
-                // order doesn't matter, though
-                if first.path.placeholders_sorted != route.path.placeholders_sorted {
+                if first.placeholders() != route.placeholders() {
                     let first = first
-                        .path
-                        .placeholders_sorted
+                        .placeholders()
                         .iter()
                         .map(|ident| ident.to_string())
                         .collect::<Vec<_>>()
                         .join(", ");
                     let other = route
-                        .path
-                        .placeholders_sorted
+                        .placeholders()
                         .iter()
                         .map(|ident| ident.to_string())
                         .collect::<Vec<_>>()
                         .join(", ");
                     panic!(
-                        "different placeholders used on variant `{}`: `{}` vs. `{}`",
+                        "different placeholders used on variant `{}`: `{}` vs. `{}` (they have to be in the same order)",
                         ast.ident, first, other
                     );
                 }

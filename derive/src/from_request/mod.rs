@@ -69,6 +69,7 @@ mod parse;
 use self::parse::{ItemData, PathMap, VariantData};
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
+use std::iter;
 use syn::Variant;
 
 pub fn derive_from_request(s: synstructure::Structure) -> TokenStream {
@@ -130,29 +131,104 @@ pub fn derive_from_request(s: synstructure::Structure) -> TokenStream {
         })
         .collect::<Vec<_>>();
 
-    // We only care about variants with at least one `#[method]`-style attr
-    let variants = variant_data
+    let (variants, variant_matches_path): (Vec<_>, Vec<_>) = variant_data
         .iter()
-        .filter_map(|data| {
-            if data.routes().is_empty() {
-                None // not routable
+        .zip(s.variants())
+        .filter_map(|(data, variant)| {
+            if let Some(route) = data.routes().first() {
+                let matches_path = if route.placeholders().is_empty() {
+                    // If there's no placeholders, there's no FromStr impls we have to check
+                    quote!(true)
+                } else {
+                    let tys = route
+                        .placeholders()
+                        .iter()
+                        .map(|name| {
+                            variant
+                                .ast()
+                                .fields
+                                .iter()
+                                .find(|field| field.ident.as_ref() == Some(name))
+                                .expect("internal error: couldn't find field by name")
+                                .ty
+                                .clone()
+                        })
+                        .collect::<Vec<_>>();
+                    let indices = tys
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| i + 1)
+                        .collect::<Vec<_>>();
+
+                    quote! {
+                        let caps = regex
+                            .captures(path)
+                            .expect("internal error: regex first matched but now didn't?");
+
+                        #( <#tys as FromStr>::from_str(
+                            caps
+                                .get(#indices)
+                                .expect("internal error: capture group did not match anything")
+                                .as_str()
+                        ).is_ok() )&&*
+                    }
+                };
+                Some((data.variant_name().clone(), matches_path))
             } else {
-                Some(data.variant_name().clone())
+                // We only care about variants with at least one `#[method]`-style attr
+                None
             }
         })
-        .collect::<Vec<_>>();
+        .unzip();
     let variants = &variants;
 
     let regex_match_arms = pathmap
         .paths()
         .enumerate()
         .flat_map(|(i, pathinfo)| {
-            pathinfo.method_map().map(move |(method, variant)| {
-                let variant = &variant.variant_name();
-                quote! {
-                    (#i, &http::Method::#method) => Variants::#variant,
-                }
-            })
+            pathinfo
+                .method_map()
+                .map(move |(method, variant)| {
+                    let variant = &variant.variant_name();
+                    quote! {
+                        (#i, &http::Method::#method) => Variants::#variant,
+                    }
+                })
+                .chain(iter::once({
+                    // This arm matches when the path matches, but an incorrect method is used.
+                    if pathinfo.regex().captures_len() == 0 {
+                        // No captures, no FromStr: We have a fixed list of allowed methods
+                        let methods = pathinfo.method_map().map(|(m, _)| m).collect::<Vec<_>>();
+
+                        quote! {
+                            (#i, _) => return Error::wrong_method(&[
+                                #( Method::#methods, )*
+                            ]).into_future(),
+                        }
+                    } else {
+                        // FIXME determine the allowed routes
+                        let (variants, methods): (Vec<_>, Vec<_>) = pathinfo
+                            .method_map()
+                            .map(|(method, variant)| (variant.variant_name(), method))
+                            .unzip();
+
+                        quote! {
+                            (#i, _) => {
+                                let path = request.uri().path();
+                                let regex = REGEXES[#i].as_ref().unwrap();
+                                let mut methods = Vec::new();
+
+                                #(
+                                    if Variants::#variants.matches_path(regex, path) {
+                                        methods.push(&http::Method::#methods);
+                                    }
+                                )*
+
+                                return Error::wrong_method(methods).into_future();
+                            }
+                        }
+                    }
+                }))
         })
         .collect::<Vec<_>>();
 
@@ -180,6 +256,7 @@ pub fn derive_from_request(s: synstructure::Structure) -> TokenStream {
         // Make sure `.as_ref()` always refers to the `AsRef` trait in libstd.
         // Otherwise the calling crate could override this.
         use core::convert::AsRef;
+        use core::str::FromStr;
 
         gen impl FromRequest for @Self {
             type Result = DefaultFuture<Self, BoxedError>;
@@ -188,11 +265,16 @@ pub fn derive_from_request(s: synstructure::Structure) -> TokenStream {
             fn from_request(request: http::Request<hyper::Body>, context: Self::Context) -> Self::Result {
                 // Step 0: `Variants` has all variants of the input enum that have a route attribute
                 // but without any data.
-                // It's sortable (by declaration order) because we prioritize the variants that are
-                // declared first.
-                #[derive(PartialEq, Eq, PartialOrd, Ord, Copy, Clone)]
                 enum Variants {
                     #(#variants,)*
+                }
+
+                impl Variants {
+                    fn matches_path(&self, regex: &Regex, path: &str) -> bool {
+                        match self {
+                            #( Variants::#variants => { #variant_matches_path } )*
+                        }
+                    }
                 }
 
                 // Step 1: Match against the generated regex set and inspect the HTTP
@@ -209,21 +291,18 @@ pub fn derive_from_request(s: synstructure::Structure) -> TokenStream {
 
                 let method = request.method();
                 let matches = ROUTES.matches(request.uri().path());
-                let opt = matches.iter()
-                    .map(|index| -> (usize, Variants) {
-                        // Use the index of the matching regex as well as the method to find the right
-                        // variant.
-                        let variant = match (index, request.method()) {
-                            #(#regex_match_arms)*
-                            _ => unreachable!("FromRequest derive generated bad match"),
-                        };
-                        (index, variant)
-                    })
-                    .min_by_key(|(_, variant)| *variant);
-
-                let (index, variant) = match opt {
-                    Some(v) => v,
+                debug_assert!(
+                    matches.iter().count() <= 1,
+                    "internal error: FromRequest derive produced overlapping regexes"
+                );
+                let index = match matches.iter().next() {
+                    Some(index) => index,
                     None => return Error::from_kind(ErrorKind::NoMatchingRoute).into_future(),
+                };
+
+                let variant = match (index, method) {
+                    #(#regex_match_arms)*
+                    _ => unreachable!("FromRequest derive generated bad match"),
                 };
 
                 match variant {

@@ -1,6 +1,9 @@
 use from_request::{
-    body::Json, futures::IntoFuture, http::Request, hyper::Body, BoxedError, FromRequest, Guard,
-    NoContext, RequestContext,
+    body::Json,
+    futures::IntoFuture,
+    http::{Method, Request},
+    hyper::Body,
+    BoxedError, Error, ErrorKind, FromRequest, Guard, NoContext, RequestContext,
 };
 use serde::Deserialize;
 use tokio::runtime::current_thread::Runtime;
@@ -30,6 +33,7 @@ fn invoke_context<T: FromRequest>(
         .block_on(future)
 }
 
+#[derive(Debug)]
 struct MyGuard;
 
 impl Guard for MyGuard {
@@ -44,7 +48,7 @@ impl Guard for MyGuard {
 
 #[test]
 fn test() {
-    #[derive(FromRequest)]
+    #[derive(FromRequest, Debug)]
     #[allow(dead_code)]
     enum Routes {
         #[post("/login")]
@@ -69,14 +73,14 @@ fn test() {
         },
     }
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, Debug)]
     #[allow(dead_code)]
     struct LoginData {
         email: String,
         password: String,
     }
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, Debug)]
     #[serde(untagged)]
     #[allow(dead_code)]
     enum PatchUser {
@@ -89,7 +93,7 @@ fn test() {
         },
     }
 
-    invoke::<Routes>(
+    let login = invoke::<Routes>(
         Request::post("https://example.com/login")
             .body(
                 r#"
@@ -103,6 +107,35 @@ fn test() {
             .unwrap(),
     )
     .expect("/login not routed properly");
+    match login {
+        Routes::Login {
+            params: (),
+            gourd: MyGuard,
+            data: Json(body),
+        } => {
+            assert_eq!(body.email, "test@example.com");
+            assert_eq!(body.password, "hunter2");
+        }
+        _ => panic!("unexpected result: {:?}", login),
+    }
+
+    let get_login = invoke::<Routes>(
+        Request::get("https://example.com/login")
+            .body(Body::empty())
+            .unwrap(),
+    );
+    let error: Box<Error> = get_login.unwrap_err().downcast().unwrap();
+    assert_eq!(error.kind(), ErrorKind::WrongMethod);
+    assert_eq!(error.allowed_methods(), &[&Method::POST]);
+
+    let post_user = invoke::<Routes>(
+        Request::post("https://example.com/users/0")
+            .body(Body::empty())
+            .unwrap(),
+    );
+    let error: Box<Error> = post_user.unwrap_err().downcast().unwrap();
+    assert_eq!(error.kind(), ErrorKind::WrongMethod);
+    assert_eq!(error.allowed_methods(), &[&Method::GET, &Method::PATCH]);
 }
 
 /// Tests that `#[context]` can be used to change the context accepted by the

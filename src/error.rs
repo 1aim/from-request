@@ -1,14 +1,14 @@
 use crate::{BoxedError, DefaultFuture};
 use futures::IntoFuture;
 use http::StatusCode;
-use std::{error, fmt};
+use std::{borrow::Cow, error, fmt};
 
 /// The error type used by this library.
 #[derive(Debug)]
 pub struct Error {
     kind: ErrorKind,
     /// In case of a `WrongMethod` error, stores the allowed HTTP methods.
-    allowed_methods: &'static [&'static http::Method],
+    allowed_methods: Cow<'static, [&'static http::Method]>,
     source: Option<BoxedError>,
 }
 
@@ -17,7 +17,7 @@ impl Error {
     pub fn from_kind(kind: ErrorKind) -> Self {
         Self {
             kind,
-            allowed_methods: &[],
+            allowed_methods: (&[][..]).into(),
             source: None,
         }
     }
@@ -30,16 +30,19 @@ impl Error {
     {
         Self {
             kind,
-            allowed_methods: &[],
+            allowed_methods: (&[][..]).into(),
             source: Some(Box::new(source)),
         }
     }
 
     /// Creates a `WrongMethod` error, given the allowed set of HTTP methods.
-    pub fn wrong_method(allowed_methods: &'static [&'static http::Method]) -> Self {
+    pub fn wrong_method<M>(allowed_methods: M) -> Self
+    where
+        M: Into<Cow<'static, [&'static http::Method]>>,
+    {
         Self {
             kind: ErrorKind::WrongMethod,
-            allowed_methods,
+            allowed_methods: allowed_methods.into(),
             source: None,
         }
     }
@@ -86,6 +89,11 @@ impl Error {
     pub fn into_future<T: Send + 'static>(self) -> DefaultFuture<T, BoxedError> {
         let boxed = Box::new(self) as BoxedError;
         Box::new(Err(boxed).into_future())
+    }
+
+    #[doc(hidden)] // only used by tests
+    pub fn allowed_methods(&self) -> &[&'static http::Method] {
+        &self.allowed_methods
     }
 }
 

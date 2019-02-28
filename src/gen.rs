@@ -89,6 +89,39 @@ impl FromRequest for Routes {
             Post,
         }
 
+        impl Variant {
+            fn matches_path(&self, regex: &Regex, path: &str) -> bool {
+                match self {
+                    Variant::Index => true,
+                    Variant::User => {
+                        let caps = regex
+                            .captures(path)
+                            .expect("internal error: regex first matched but now didn't?");
+                        // Extract captures starting at 1 (0 = entire match)
+                        let id_str = caps
+                            .get(1)
+                            .expect("internal error: capture group did not match anything")
+                            .as_str();
+                        // Parse captured path segments
+                        <u32 as FromStr>::from_str(id_str).is_ok()
+                    }
+                    Variant::EditUser => {
+                        let caps = regex
+                            .captures(path)
+                            .expect("internal error: regex first matched but now didn't?");
+                        // Extract captures starting at 1 (0 = entire match)
+                        let id_str = caps
+                            .get(1)
+                            .expect("internal error: capture group did not match anything")
+                            .as_str();
+                        // Parse captured path segments
+                        <u32 as FromStr>::from_str(id_str).is_ok()
+                    }
+                    Variant::Post => true,
+                }
+            }
+        }
+
         // Step 1: Match against the generated regex set and inspect the HTTP
         // method in order to find the route that matches.
         lazy_static! {
@@ -107,9 +140,10 @@ impl FromRequest for Routes {
             };
         }
 
-        let matches = ROUTES.matches(request.uri().path());
-        assert!(
-            matches.len() <= 1,
+        let path = request.uri().path();
+        let matches = ROUTES.matches(path);
+        debug_assert!(
+            matches.iter().count() <= 1,
             "internal error: FromRequest derive produced overlapping regexes"
         );
 
@@ -122,14 +156,25 @@ impl FromRequest for Routes {
         let variant = match (index, method) {
             // "/"
             (0, &Method::GET) => Variant::Index,
-            (0, _) => return Error::wrong_method(&[&Method::GET]).into_future(),
+            (0, _) => return Error::wrong_method(&[&Method::GET][..]).into_future(),
             // "/users/:id"
             (1, &Method::GET) => Variant::User,
             (1, &Method::PATCH) => Variant::EditUser,
-            (1, _) => return Error::wrong_method(&[&Method::GET, &Method::PATCH]).into_future(),
+            (1, _) => {
+                let regex = REGEXES[1].as_ref().unwrap();
+                let mut methods = Vec::new();
+                if Variant::User.matches_path(regex, path) {
+                    methods.push(&Method::GET);
+                }
+                if Variant::EditUser.matches_path(regex, path) {
+                    methods.push(&Method::PATCH);
+                }
+                // ...
+                return Error::wrong_method(methods).into_future();
+            }
             // "/test"
             (2, &Method::POST) => Variant::Post,
-            (2, _) => return Error::wrong_method(&[&Method::POST]).into_future(),
+            (2, _) => return Error::wrong_method(&[&Method::POST][..]).into_future(),
             _ => unimplemented!(),
         };
 
