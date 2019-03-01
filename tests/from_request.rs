@@ -119,32 +119,20 @@ fn test() {
         _ => panic!("unexpected result: {:?}", login),
     }
 
-
-    let get_login = invoke::<Routes>(
-        Request::get("/login")
-            .body(Body::empty())
-            .unwrap(),
-    );
+    let get_login = invoke::<Routes>(Request::get("/login").body(Body::empty()).unwrap());
     let error: Box<Error> = get_login.unwrap_err().downcast().unwrap();
     assert_eq!(error.kind(), ErrorKind::WrongMethod);
     assert_eq!(error.allowed_methods(), &[&Method::POST]);
 
-
-    let post_user = invoke::<Routes>(
-        Request::post("/users/0")
-            .body(Body::empty())
-            .unwrap(),
-    );
+    let post_user = invoke::<Routes>(Request::post("/users/0").body(Body::empty()).unwrap());
     let error: Box<Error> = post_user.unwrap_err().downcast().unwrap();
     assert_eq!(error.kind(), ErrorKind::WrongMethod);
-    assert_eq!(error.allowed_methods(), &[&Method::GET, &Method::PATCH, &Method::HEAD]);
-
-
-    let user = invoke::<Routes>(
-        Request::get("/users/wrong")
-            .body(Body::empty())
-            .unwrap(),
+    assert_eq!(
+        error.allowed_methods(),
+        &[&Method::GET, &Method::PATCH, &Method::HEAD]
     );
+
+    let user = invoke::<Routes>(Request::get("/users/wrong").body(Body::empty()).unwrap());
     let error: Box<Error> = user.unwrap_err().downcast().unwrap();
     assert_eq!(error.kind(), ErrorKind::PathSegment);
     assert_eq!(error.http_status(), StatusCode::NOT_FOUND);
@@ -190,17 +178,15 @@ fn any_placeholder() {
     #[derive(FromRequest, Debug)]
     enum Routes {
         #[get("/{ph}/{rest...}")]
-        Variant {
-            ph: u32,
-            rest: String,
-        },
+        Variant { ph: u32, rest: String },
     }
 
     let route = invoke::<Routes>(
         Request::get("/1234/bla/bli?param=123")
             .body(Body::empty())
             .unwrap(),
-    ).unwrap();
+    )
+    .unwrap();
     match route {
         Routes::Variant { ph, rest } => {
             assert_eq!(ph, 1234);
@@ -217,17 +203,9 @@ fn asterisk() {
         ServerOptions,
     }
 
-    invoke::<Routes>(
-        Request::options("*")
-            .body(Body::empty())
-            .unwrap(),
-    ).unwrap();
+    invoke::<Routes>(Request::options("*").body(Body::empty()).unwrap()).unwrap();
 
-    invoke::<Routes>(
-        Request::options("/")
-            .body(Body::empty())
-            .unwrap(),
-    ).unwrap_err();
+    invoke::<Routes>(Request::options("/").body(Body::empty()).unwrap()).unwrap_err();
 }
 
 #[test]
@@ -245,17 +223,9 @@ fn implicit_head_route() {
         OtherHead,
     }
 
-    let head = invoke::<Routes>(
-        Request::head("/")
-            .body(Body::empty())
-            .unwrap(),
-    ).unwrap();
+    let head = invoke::<Routes>(Request::head("/").body(Body::empty()).unwrap()).unwrap();
     assert_eq!(head, Routes::Index);
 
-    let anyhead = invoke::<Routes>(
-        Request::head("/2/other")
-            .body(Body::empty())
-            .unwrap(),
-    ).unwrap();
+    let anyhead = invoke::<Routes>(Request::head("/2/other").body(Body::empty()).unwrap()).unwrap();
     assert_eq!(anyhead, Routes::OtherHead);
 }
