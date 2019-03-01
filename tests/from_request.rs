@@ -228,4 +228,7 @@ fn implicit_head_route() {
 
     let anyhead = invoke::<Routes>(Request::head("/2/other").body(Body::empty()).unwrap()).unwrap();
     assert_eq!(anyhead, Routes::OtherHead);
+
+    let anyhead = invoke::<Routes>(Request::get("/2/other").body(Body::empty()).unwrap()).unwrap();
+    assert_eq!(anyhead, Routes::Other);
 }
