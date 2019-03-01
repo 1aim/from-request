@@ -110,6 +110,7 @@ pub fn derive_from_request(s: synstructure::Structure) -> TokenStream {
         .paths()
         .map(|p| p.regex().as_str().to_string())
         .collect::<Vec<_>>();
+    let all_regexes = &all_regexes;
 
     if pathmap.paths().next().is_none() {
         // No route attributes. This situation would lead to "cannot infer type
@@ -290,10 +291,12 @@ pub fn derive_from_request(s: synstructure::Structure) -> TokenStream {
                 }
 
                 let method = request.method();
-                let matches = ROUTES.matches(request.uri().path());
+                let path = request.uri().path();
+                let matches = ROUTES.matches(path);
                 debug_assert!(
                     matches.iter().count() <= 1,
-                    "internal error: FromRequest derive produced overlapping regexes"
+                    "internal error: FromRequest derive produced overlapping regexes (path={},method={},regexes={:?})",
+                    path, method, &[ #(#all_regexes),* ]
                 );
                 let index = match matches.iter().next() {
                     Some(index) => index,
@@ -543,7 +546,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "route `/{pl}` overlaps with previously defined route `/{ph}`")]
+    #[should_panic(
+        expected = r#"duplicate route: `#[get("/{ph}")]` on `Variant` matches the same requests as `#[get("/{pl}")]` on `Var`"#
+    )]
     fn dup_routes() {
         expand! {
             enum Routes {
@@ -639,7 +644,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "route `/{ph}` overlaps with previously defined route `/0`")]
+    #[should_panic(
+        expected = r#"route `#[get("/{ph}")]` overlaps with previously defined route `#[get("/0")]`"#
+    )]
     fn overlap() {
         expand! {
             enum Routes {

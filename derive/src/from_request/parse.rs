@@ -2,7 +2,7 @@ use crate::utils::ByProxy;
 use indexmap::{map::Entry, IndexMap};
 use proc_macro2::{Ident, Span};
 use regex::Regex;
-use std::slice;
+use std::{fmt, slice};
 use syn::{Attribute, Lit, Meta, NestedMeta};
 use synstructure::VariantAst;
 
@@ -23,9 +23,10 @@ fn known_attr(name: &Ident) -> bool {
     our_attrs().find(|s| name == s).is_some()
 }
 
-/// Returns whether `name` names an HTTP method (lowercase only).
+/// Returns whether `name` names an HTTP method attribute (lowercase only).
 fn is_method(name: &Ident) -> bool {
-    METHOD_ATTRS.iter().cloned().find(|a| name == a).is_some()
+    let name = name.to_string().to_lowercase();
+    METHOD_ATTRS.iter().cloned().find(|a| name == *a).is_some()
 }
 
 /// Parsed attributes attached to the item that does `#[derive(FromRequest)]`.
@@ -283,6 +284,18 @@ impl Route {
     }
 }
 
+impl fmt::Display for Route {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let method = self.method.to_string().to_lowercase();
+        if is_method(&self.method) {
+            write!(f, "#[{}(\"{}\")]", method, self.path.raw)
+        } else {
+            // XXX this isn't yet implemented
+            write!(f, "#[route({}, \"{}\")]", method, self.path.raw)
+        }
+    }
+}
+
 /// A parsed path of an HTTP route.
 #[derive(Clone)]
 pub struct RoutePath {
@@ -368,11 +381,17 @@ impl RoutePath {
 
         Self {
             raw: path,
-            regex: Regex::new(&regex).expect("FromRequest derive created invalid regex"),
+            regex: Regex::new(&format!("^{}$", regex))
+                .expect("FromRequest derive created invalid regex"),
             segments,
             placeholders,
             placeholders_sorted,
         }
+    }
+
+    /// Returns `true` if `self` and `other` match the exact same set of paths.
+    fn matches_same_paths(&self, other: &Self) -> bool {
+        self.regex.as_str() == other.regex.as_str()
     }
 
     /// Tries to find a route that can be matched by both `self` and `other`.
@@ -440,6 +459,10 @@ impl RoutePath {
     ///
     /// If the last placeholder is a "rest" placeholder, it will be yielded indefinitely.
     fn segments_fused(&self) -> impl Iterator<Item = &PathSegment> {
+        assert!(
+            !self.segments.is_empty(),
+            "`*` path has no segments to iterate over"
+        );
         SegmentsFused::Unfused(self.segments.iter())
     }
 }
@@ -520,55 +543,86 @@ pub struct PathMap {
 
 impl PathMap {
     pub fn build(variants: &[VariantData]) -> Self {
-        let mut regexes = Vec::new();
-        let mut regex_map = IndexMap::new();
-
-        let mut overlap_map = IndexMap::new();
+        let mut this = Self {
+            regex_map: IndexMap::new(),
+        };
 
         for variant in variants {
             for route in &variant.routes {
-                let routes_for_method = overlap_map
-                    .entry(route.method.clone())
-                    .or_insert_with(Vec::<Route>::new);
-                for prev_route in routes_for_method.iter() {
+                // Check for overlap with all previously registered routes
+                for prev_route in this
+                    .regex_map
+                    .values()
+                    .flat_map(|m| m.values().map(|(_, r)| r))
+                    .filter(|r| !r.path.matches_same_paths(&route.path))
+                {
                     if let Some(overlap) = prev_route.path.find_overlap(&route.path) {
                         panic!(
-                            "{}-route `{}` overlaps with previously defined route `{}` (both would match path `{}`)",
-                            route.method, route.path.raw, prev_route.path.raw, overlap
+                            "route `{}` overlaps with previously defined route `{}` (both would match path `{}`)",
+                            route, prev_route, overlap
                         );
                     }
                 }
-                routes_for_method.push(route.clone());
 
-                let reg = ByProxy::new(route.path.regex.clone(), Regex::as_str);
-                let entry = regex_map.entry(reg);
-                let regex_index = entry.index();
-                let route_map = entry.or_insert_with(IndexMap::new);
-                match route_map.entry(route.method.clone()) {
-                    Entry::Vacant(v) => {
-                        // Map this path regex and method to the variant it was placed on:
-                        let route = route.clone();
+                this.add_route(variant.clone(), route.clone());
+            }
+        }
 
-                        if regexes.len() == regex_index {
-                            regexes
-                                .push((route.path.regex.clone(), !route.placeholders().is_empty()));
+        // For each GET route, register a matching HEAD route if none exists
+        let any_head_overlaps_with = |new_route: &Route| {
+            this.regex_map
+                .values()
+                .flat_map(|map| {
+                    map.iter().filter_map(|(method, (_, route))| {
+                        if method.to_string() == "HEAD" {
+                            Some(route)
+                        } else {
+                            None
                         }
-
-                        v.insert((variant.clone(), route));
-                    }
-                    Entry::Occupied(old) => {
-                        // duplicate path declaration
-                        let old = old.get();
-                        panic!(
-                            "internal error in from-request! duplicate route: `{}` on `{}` collides with `{}` on `{}`. please report a bug.",
-                            old.1.path.raw, old.0.name, route.path.raw, variant.name
-                        );
+                    })
+                })
+                .any(|route| route.path.find_overlap(&new_route.path).is_some())
+        };
+        let mut implied_head_routes = Vec::new();
+        for route_map in this.regex_map.values() {
+            for (method, (variant, route)) in route_map.iter() {
+                if method.to_string() == "GET" {
+                    let head = Route {
+                        method: Ident::new("HEAD", Span::call_site()),
+                        path: route.path.clone(),
+                    };
+                    if !any_head_overlaps_with(&head) {
+                        implied_head_routes.push((variant.clone(), head));
                     }
                 }
             }
         }
 
-        Self { regex_map }
+        for (variant, route) in implied_head_routes {
+            this.add_route(variant, route);
+        }
+
+        this
+    }
+
+    fn add_route(&mut self, variant: VariantData, route: Route) {
+        let reg = ByProxy::new(route.path.regex.clone(), Regex::as_str);
+        let entry = self.regex_map.entry(reg);
+        let route_map = entry.or_insert_with(IndexMap::new);
+        match route_map.entry(route.method.clone()) {
+            Entry::Vacant(v) => {
+                // Map this path regex and method to the variant it was placed on:
+                v.insert((variant, route));
+            }
+            Entry::Occupied(old) => {
+                // duplicate path declaration
+                let old = old.get();
+                panic!(
+                    "duplicate route: `{}` on `{}` matches the same requests as `{}` on `{}`",
+                    old.1, old.0.name, route, variant.name
+                );
+            }
+        }
     }
 
     /// Returns an iterator over all unique paths in this map.

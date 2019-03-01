@@ -5,7 +5,7 @@
 //!
 //! [`from-request`]: https://docs.rs/from-request
 
-#![recursion_limit = "128"]
+#![recursion_limit = "256"]
 
 use synstructure::decl_derive;
 

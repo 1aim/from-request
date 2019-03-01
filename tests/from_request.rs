@@ -137,7 +137,7 @@ fn test() {
     );
     let error: Box<Error> = post_user.unwrap_err().downcast().unwrap();
     assert_eq!(error.kind(), ErrorKind::WrongMethod);
-    assert_eq!(error.allowed_methods(), &[&Method::GET, &Method::PATCH]);
+    assert_eq!(error.allowed_methods(), &[&Method::GET, &Method::PATCH, &Method::HEAD]);
 
 
     let user = invoke::<Routes>(
@@ -228,4 +228,34 @@ fn asterisk() {
             .body(Body::empty())
             .unwrap(),
     ).unwrap_err();
+}
+
+#[test]
+fn implicit_head_route() {
+    #[derive(FromRequest, Debug, PartialEq, Eq)]
+    enum Routes {
+        #[get("/")]
+        Index,
+
+        #[get("/2/other")]
+        Other,
+
+        // We should still be able to define our own HEAD route instead
+        #[head("/2/other")]
+        OtherHead,
+    }
+
+    let head = invoke::<Routes>(
+        Request::head("/")
+            .body(Body::empty())
+            .unwrap(),
+    ).unwrap();
+    assert_eq!(head, Routes::Index);
+
+    let anyhead = invoke::<Routes>(
+        Request::head("/2/other")
+            .body(Body::empty())
+            .unwrap(),
+    ).unwrap();
+    assert_eq!(anyhead, Routes::OtherHead);
 }
