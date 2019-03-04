@@ -11,14 +11,6 @@ TODO:
 * How to handle 2015/2018 compat with the proc-macro?
 * Good example that fetches a session from a DB
 
-* Deserialize body with `serde_urlencoded`
-*      "      ?query with `serde_qs`
-
-Forward (by-move) to inner implementation to allow nesting of FromRequest types
-(= better, more granular app structure).
-
-we should call this "von Request" instead :D
-
 */
 
 #![doc(html_root_url = "https://docs.rs/from-request/0.0.0")]
@@ -96,7 +88,8 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// JSON body.
 ///
 /// The generated `FromRequest` implementation will always use
-/// `BoxedFuture<Self, BoxedError>` as the associated `Result` type.
+/// [`DefaultFuture<Self, BoxedError>`][`DefaultFuture`] as the associated
+/// `Result` type.
 ///
 /// Note that the generated implementation will make use of `.and_then()` to
 /// chain asynchronous operations instead of running them in parallel using
@@ -127,6 +120,9 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 ///
 /// ## Extracting the request body (`#[body]` attribute)
 ///
+/// Putting `#[body]` on a field of a variant will deserialize the request body
+/// using the [`FromBody`] trait and store the result in the annotated field:
+///
 /// ```ignore
 /// #[post("/login")]
 /// Login {
@@ -135,10 +131,8 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// },
 /// ```
 ///
-/// Putting `#[body]` on a field of a variant will deserialize the request body
-/// and store the result in the annotated field. The type of the field must
-/// implement [`FromBody`]. The [`body` module] contains predefined types
-/// implementing that trait.
+/// The type of the field must implement [`FromBody`]. The [`body` module]
+/// contains predefined types implementing that trait.
 ///
 /// ## Extracting query parameters (`#[query_params]` attribute)
 ///
@@ -184,9 +178,10 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 ///
 /// [`FromBody`]: trait.FromBody.html
 /// [`NoContext`]: struct.NoContext.html
+/// [`DefaultFuture`]: type.DefaultFuture.html
 /// [`body` module]: body/index.html
 pub trait FromRequest: Sized {
-    /// A context parameter passed to `from_request`.
+    /// A context parameter passed to [`from_request`].
     ///
     /// This can be used to pass application-specific data like a logger or a
     /// database connection around.
@@ -195,20 +190,25 @@ pub trait FromRequest: Sized {
     /// context type that can be obtained from any [`RequestContext`] via
     /// `AsRef`.
     ///
+    /// [`from_request`]: #tymethod.from_request
     /// [`NoContext`]: struct.NoContext.html
     /// [`RequestContext`]: trait.RequestContext.html
     type Context: RequestContext;
 
-    /// The result returned by `from_request`.
+    /// The result returned by [`from_request`].
     ///
     /// Because `impl Trait` cannot be used inside traits (and named
     /// existentential types aren't yet stable), the type here might not be
-    /// nameable. In that case, you can set it to `DefaultFuture<Self, Error>`
-    /// and box the returned future.
+    /// nameable. In that case, you can set it to
+    /// [`DefaultFuture<Self, Error>`][`DefaultFuture`] and box the returned
+    /// future.
     ///
     /// If your `FromRequest` implementation doesn't need to return a future
     /// (eg. because it's just a parsing step), you can set this to
     /// `Result<Self, ...>` and immediately return the result of the conversion.
+    ///
+    /// [`DefaultFuture`]: type.DefaultFuture.html
+    /// [`from_request`]: #tymethod.from_request
     type Result: IntoFuture<Item = Self>;
 
     /// Create a `Self` from an HTTP request.
@@ -229,7 +229,7 @@ pub trait FromRequest: Sized {
     /// implementation will internally create a single-threaded tokio runtime to
     /// perform the conversion and receive the request body.
     ///
-    /// [`from_request`]: #method.from_request
+    /// [`from_request`]: #tymethod.from_request
     fn from_request_sync(
         request: http::Request<hyper::Body>,
         context: Self::Context,
@@ -329,30 +329,6 @@ pub trait FromBody: Sized {
         context: &Self::Context,
     ) -> Self::Result;
 }
-
-/*
-
-With this setup, #[derive(FromRequest)] essentially has 2 choices:
-* Run all member fields `FromRequest` futures in series using `and_then`
-* Run all futures in parallel using `join_all`
-
-For the second option, all futures must have the same type.
-
-The derive also has to set the assoc. `Future` to the right thing.
-
-
-Also:
-
-Don't want to box all futures, since many of them are gonna be `FutureResult`s
-that can be evaluated immediately (eg. if it's just a parsing step).
-
-=> The `and_then` solution seems much better - incoming requests can still be
-   handled in parallel.
-
-Problem: All web frameworks seem to define their own request type, with no hyper
-interop.
-
-*/
 
 /// Default context used by [`FromRequest`] implementations.
 ///
