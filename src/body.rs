@@ -8,10 +8,9 @@
 // TODO: Who should enforce a Content-Length limit? document that these structs don't.
 // TODO: Add many more types here and make them optional
 
-use crate::{DefaultFuture, FromBody, NoContext};
+use crate::{DefaultFuture, BoxedError, FromBody, NoContext};
 use futures::{Future, Stream};
 use serde::de::DeserializeOwned;
-use std::error::Error;
 
 /// Decodes an `x-www-form-urlencoded` request body (eg. sent by an HTML form).
 ///
@@ -34,7 +33,7 @@ impl<T: DeserializeOwned + Send + 'static> FromBody for HtmlForm<T> {
     type Context = NoContext;
 
     // TODO use our error type
-    type Result = DefaultFuture<Self, Box<dyn Error + Send + Sync>>;
+    type Result = DefaultFuture<Self, BoxedError>;
 
     fn from_body(
         _request: &http::Request<()>,
@@ -60,7 +59,7 @@ pub struct Json<T: DeserializeOwned + Send + 'static>(pub T);
 impl<T: DeserializeOwned + Send + 'static> FromBody for Json<T> {
     type Context = NoContext;
 
-    type Result = DefaultFuture<Self, Box<dyn Error + Send + Sync>>;
+    type Result = DefaultFuture<Self, BoxedError>;
 
     fn from_body(
         _request: &http::Request<()>,
