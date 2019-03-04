@@ -98,7 +98,77 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// requests will still be handled in parallel, so this should not negatively
 /// affect performance.
 ///
-/// ## Extracting Path Segments (`{field}` syntax)
+/// In order to keep the implementation simple and user code more easily
+/// understandable, overlapping paths are not allowed (unless the paths are
+/// *exactly* the same, and the method differs), so the following will fail to
+/// compile:
+///
+/// ```compile_fail
+/// use from_request::{FromRequest, body::Json};
+/// # use serde::Deserialize;
+///
+/// #[derive(FromRequest)]
+/// enum Routes {
+///     #[get("/users/{id}")]
+///     User { id: u32 },
+///
+///     #[get("/users/me")]
+///     Me,
+/// }
+/// ```
+///
+/// To fix this, you can define a custom type implementing `FromStr` and use
+/// that:
+///
+/// ```
+/// use from_request::{FromRequest, BoxedError, body::Json};
+/// # use serde::Deserialize;
+/// # use std::str::FromStr;
+/// # use std::num::ParseIntError;
+///
+/// #[derive(FromRequest)]
+/// enum Routes {
+///     #[get("/users/{id}")]
+///     User { id: UserId },
+/// }
+///
+/// enum UserId {
+///     /// User by database ID.
+///     Id(u32),
+///     /// The currently logged-in user.
+///     Me,
+/// }
+///
+/// impl FromStr for UserId {
+///     type Err = ParseIntError;
+///
+///     fn from_str(s: &str) -> Result<Self, Self::Err> {
+///         if s == "me" {
+///             Ok(UserId::Me)
+///         } else {
+///             Ok(UserId::Id(s.parse()?))
+///         }
+///     }
+/// }
+/// ```
+///
+/// ## Implicit `HEAD` routes
+///
+/// The custom derive will create a `HEAD` route for every defined `GET` route,
+/// unless you define one yourself. Since sending back responses is not in scope
+/// of the `from-request` library, you should check the method yourself and only
+/// send back headers if it's a `HEAD` request.
+///
+/// ## Extracting Request Data
+///
+/// The custom derive provides easy access to various kinds of data encoded in a
+/// request:
+///
+/// * The Request path (`/users/or/other/stuff`)
+/// * Query parameters (`?name=val`)
+/// * The request body
+///
+/// ### Extracting Path Segments (`{field}` syntax)
 ///
 /// In a route attribute, the `{field}` placeholder syntax will match a path
 /// segment and convert it to the type of the named field using `FromStr`:
@@ -118,7 +188,7 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// implementation will bail out with an error (in other words, this feature
 /// cannot be used to try multiple routes in sequence until one matches).
 ///
-/// ## Extracting the request body (`#[body]` attribute)
+/// ### Extracting the request body (`#[body]` attribute)
 ///
 /// Putting `#[body]` on a field of a variant will deserialize the request body
 /// using the [`FromBody`] trait and store the result in the annotated field:
@@ -132,9 +202,10 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// ```
 ///
 /// The type of the field must implement [`FromBody`]. The [`body` module]
-/// contains predefined types implementing that trait.
+/// contains predefined adapters implementing that trait, which work with any
+/// type implementing `Deserialize`.
 ///
-/// ## Extracting query parameters (`#[query_params]` attribute)
+/// ### Extracting query parameters (`#[query_params]` attribute)
 ///
 /// The route attribute cannot match or extract query parameters (`?name=val`).
 /// Instead, query parameters can be extracted by marking a field in the struct
@@ -168,15 +239,42 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// trait and the conversion will be performed using the `serde_urlencoded`
 /// crate.
 ///
-/// # Changing the `Context` type
+/// ## Guards
 ///
-/// By default, the derive will use [`NoContext`] as the associated `Context`
-/// type. You can change this by putting a `#[context = MyContext]` attribute on
-/// the type:
+/// Guards can be used to prevent a route from being called when a condition is
+/// not fulfilled (for example, when the user isn't logged in). All fields that
+/// are neither mentioned in the route path nor annotated with an attribute are
+/// considered guards and thus must implement the [`Guard`] trait.
 ///
-/// TODO document everything about the derive
+/// ## Changing the `Context` type
+///
+/// By default, the generated code will use [`NoContext`] as the associated
+/// `Context` type. You can change this by putting a `#[context(MyContext)]`
+/// attribute on the type:
+///
+/// ```
+/// # struct MyDatabaseConnection;
+/// use from_request::{FromRequest, RequestContext};
+/// # use serde::Deserialize;
+///
+/// #[derive(RequestContext)]
+/// struct MyContext {
+///     db: MyDatabaseConnection,
+/// }
+///
+/// #[derive(FromRequest)]
+/// #[context(MyContext)]
+/// enum Routes {
+///     #[get("/users")]
+///     UserList,
+/// }
+/// ```
+///
+/// For more info on this, refer to the [`RequestContext`] trait.
 ///
 /// [`FromBody`]: trait.FromBody.html
+/// [`RequestContext`]: trait.RequestContext.html
+/// [`Guard`]: trait.Guard.html
 /// [`NoContext`]: struct.NoContext.html
 /// [`DefaultFuture`]: type.DefaultFuture.html
 /// [`body` module]: body/index.html
