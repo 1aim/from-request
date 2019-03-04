@@ -1,5 +1,8 @@
-//! Provides wrappers that implement `FromRequest` by deserializing a request
-//! body.
+//! Provides wrappers that deserialize a request body.
+//!
+//! All wrappers provided here implement [`FromBody`].
+//!
+//! [`FromBody`]: ../trait.FromBody.html
 
 // TODO: Should these check `Content-Type`?
 // TODO: Who should enforce a Content-Length limit? document that these structs don't.
