@@ -20,9 +20,10 @@ decl_derive!([FromRequest, attributes(
     context, body, query_params,
 
     // We support all HTTP verbs from RFC 7231 as well as PATCH
-    get, head, post, put, delete, connect, options, trace, patch
+    get, head, post, put, delete, connect, options, trace, patch,
 
-    // FIXME support arbitrary HTTP verbs (eg. for WebDAV)
+    // `route` supports arbitrary HTTP verbs (eg. for WebDAV)
+    route
 )] => derive_from_request);
 
 decl_derive!([RequestContext, attributes(

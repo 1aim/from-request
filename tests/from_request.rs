@@ -232,3 +232,15 @@ fn implicit_head_route() {
     let anyhead = invoke::<Routes>(Request::get("/2/other").body(Body::empty()).unwrap()).unwrap();
     assert_eq!(anyhead, Routes::Other);
 }
+
+#[test]
+fn custom_method() {
+    #[derive(FromRequest, Debug, PartialEq, Eq)]
+    enum Routes {
+        #[get("/")]
+        Index,
+
+        #[route(LOCK, "/")]
+        Lock,
+    }
+}

@@ -14,7 +14,7 @@ const METHOD_ATTRS: &[&str] = &[
 fn our_attrs() -> impl Iterator<Item = &'static str> {
     METHOD_ATTRS
         .iter()
-        .chain(&["context", "body", "query_params"])
+        .chain(&["context", "body", "query_params", "route"])
         .cloned()
 }
 
@@ -24,8 +24,8 @@ fn known_attr(name: &Ident) -> bool {
 }
 
 /// Returns whether `name` names an HTTP method attribute (lowercase only).
-fn is_method(name: &Ident) -> bool {
-    let name = name.to_string().to_lowercase();
+fn is_method_attr(name: &str) -> bool {
+    let name = name.to_lowercase();
     METHOD_ATTRS.iter().cloned().find(|a| name == *a).is_some()
 }
 
@@ -85,11 +85,23 @@ impl VariantData {
         for attr in ast.attrs {
             let meta = attr.parse_meta().unwrap();
             match &meta {
-                Meta::List(list) if is_method(&meta.name()) => {
+                Meta::List(list) if is_method_attr(&meta.name().to_string()) => {
                     routes.push(Route::parse(
                         meta.name(),
                         &list.nested.iter().collect::<Vec<_>>(),
                     ));
+                }
+                Meta::List(list) if meta.name() == "route" => {
+                    // custom method, list must look like `METHOD, "/path"`
+                    let inner = list.nested.iter().collect::<Vec<_>>();
+                    match &*inner {
+                        [NestedMeta::Meta(Meta::Word(method)), NestedMeta::Literal(Lit::Str(_))] => {
+                            routes.push(Route::parse(method.clone(), &inner[1..]));
+                        }
+                        _ => panic!(
+                            r#"#[route] attribute must be of the form #[route(METHOD, "/path")]"#
+                        ),
+                    }
                 }
                 _ if known_attr(&meta.name()) => {
                     panic!("#[{}] is not valid on enum variants", meta.name())
@@ -258,7 +270,7 @@ impl VariantData {
 #[derive(Clone)]
 pub struct Route {
     /// Name of the associated constant on `http::Method`.
-    method: Ident,
+    method: String,
     path: RoutePath,
 }
 
@@ -269,7 +281,7 @@ impl Route {
                 let path = path.value();
 
                 Self {
-                    method: Ident::new(&method.to_string().to_uppercase(), Span::call_site()),
+                    method: method.to_string().to_uppercase(),
                     path: RoutePath::parse(path),
                 }
             }
@@ -287,7 +299,7 @@ impl Route {
 impl fmt::Display for Route {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let method = self.method.to_string().to_lowercase();
-        if is_method(&self.method) {
+        if is_method_attr(&self.method) {
             write!(f, "#[{}(\"{}\")]", method, self.path.raw)
         } else {
             // XXX this isn't yet implemented
@@ -538,7 +550,7 @@ impl PathSegment {
 
 /// Maps generated path regexes to method->variant maps.
 pub struct PathMap {
-    regex_map: IndexMap<ByProxy<Regex, str>, IndexMap<Ident, (VariantData, Route)>>,
+    regex_map: IndexMap<ByProxy<Regex, str>, IndexMap<String, (VariantData, Route)>>,
 }
 
 impl PathMap {
@@ -588,7 +600,7 @@ impl PathMap {
             for (method, (variant, route)) in route_map.iter() {
                 if method.to_string() == "GET" {
                     let head = Route {
-                        method: Ident::new("HEAD", Span::call_site()),
+                        method: "HEAD".to_string(),
                         path: route.path.clone(),
                     };
                     if !any_head_overlaps_with(&head) {
@@ -636,7 +648,7 @@ impl PathMap {
 
 pub struct PathInfo<'a> {
     regex: &'a Regex,
-    method_map: &'a IndexMap<Ident, (VariantData, Route)>,
+    method_map: &'a IndexMap<String, (VariantData, Route)>,
 }
 
 impl<'a> PathInfo<'a> {
@@ -646,8 +658,8 @@ impl<'a> PathInfo<'a> {
     }
 
     /// Returns an iterator over the `Method => Variant` mappings for this path.
-    pub fn method_map(&self) -> impl Iterator<Item = (&'a Ident, &'a VariantData)> {
-        self.method_map.iter().map(|(k, v)| (k, &v.0))
+    pub fn method_map(&self) -> impl Iterator<Item = (&'a str, &'a VariantData)> {
+        self.method_map.iter().map(|(k, v)| (k.as_str(), &v.0))
     }
 }
 
