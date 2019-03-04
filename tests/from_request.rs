@@ -6,7 +6,6 @@ use from_request::{
     BoxedError, Error, ErrorKind, FromRequest, Guard, NoContext, RequestContext,
 };
 use serde::Deserialize;
-use tokio::runtime::current_thread::Runtime;
 
 /// Simulates receiving `request`, and decodes a `FromRequest` implementor `T`.
 ///
@@ -27,10 +26,7 @@ fn invoke_context<T: FromRequest>(
     request: Request<Body>,
     context: T::Context,
 ) -> Result<<T::Result as IntoFuture>::Item, <T::Result as IntoFuture>::Error> {
-    let future = T::from_request(request, context).into_future();
-    Runtime::new()
-        .expect("couldn't create tokio runtime")
-        .block_on(future)
+    T::from_request_sync(request, context)
 }
 
 #[derive(Debug)]

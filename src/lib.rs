@@ -42,6 +42,7 @@ pub use {futures, http, hyper};
 pub use {lazy_static::lazy_static, regex};
 
 use futures::{Future, IntoFuture};
+use tokio::runtime::current_thread::Runtime;
 
 /// A default boxed future that may be returned from [`FromRequest`]
 /// implementations.
@@ -96,6 +97,13 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 ///
 /// The generated `FromRequest` implementation will always use
 /// `BoxedFuture<Self, BoxedError>` as the associated `Result` type.
+///
+/// Note that the generated implementation will make use of `.and_then()` to
+/// chain asynchronous operations instead of running them in parallel using
+/// `join_all`. This is because it simplifies the code and doesn't require
+/// making use of boxed futures everywhere in the generated code. Multiple
+/// requests will still be handled in parallel, so this should not negatively
+/// affect performance.
 ///
 /// ## Extracting Path Segments (`{field}` syntax)
 ///
@@ -214,6 +222,21 @@ pub trait FromRequest: Sized {
     ///   `hyper::Body`.
     /// * **`context`**: User-defined context.
     fn from_request(request: http::Request<hyper::Body>, context: Self::Context) -> Self::Result;
+
+    /// Create a `Self` from an HTTP request, synchronously.
+    ///
+    /// This is a blocking version of [`from_request`]. The provided default
+    /// implementation will internally create a single-threaded tokio runtime to
+    /// perform the conversion and receive the request body.
+    ///
+    /// [`from_request`]: #method.from_request
+    fn from_request_sync(
+        request: http::Request<hyper::Body>,
+        context: Self::Context,
+    ) -> Result<<Self::Result as IntoFuture>::Item, <Self::Result as IntoFuture>::Error> {
+        let mut rt = Runtime::new().expect("couldn't start single-threaded tokio runtime");
+        rt.block_on(Self::from_request(request, context).into_future())
+    }
 }
 
 /// A request guard that asynchronously checks a condition of an incoming
