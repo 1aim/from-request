@@ -16,17 +16,7 @@ fn invoke<T>(
 where
     T: FromRequest<Context = NoContext>,
 {
-    invoke_context::<T>(request, NoContext)
-}
-
-/// Simulates receiving `request`, and decodes a `FromRequest` implementor `T`.
-///
-/// Passes the given context object to `T`'s `FromRequest` implementation.
-fn invoke_context<T: FromRequest>(
-    request: Request<Body>,
-    context: T::Context,
-) -> Result<<T::Result as IntoFuture>::Item, <T::Result as IntoFuture>::Error> {
-    T::from_request_sync(request, context)
+    T::from_request_sync(request, NoContext)
 }
 
 #[derive(Debug)]
