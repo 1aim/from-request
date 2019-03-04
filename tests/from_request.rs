@@ -228,3 +228,82 @@ fn implicit_head_route() {
     let anyhead = invoke::<Routes>(Request::get("/2/other").body(Body::empty()).unwrap()).unwrap();
     assert_eq!(anyhead, Routes::Other);
 }
+
+#[test]
+fn query_params() {
+    #[derive(FromRequest, PartialEq, Eq, Debug)]
+    enum Routes {
+        #[get("/users")]
+        UserList {
+            #[query_params]
+            pagination: Pagination,
+        },
+    }
+
+    #[derive(Deserialize, PartialEq, Eq, Debug)]
+    struct Pagination {
+        #[serde(default)]
+        start: u32,
+        #[serde(default = "default_count")]
+        count: u32,
+    }
+
+    fn default_count() -> u32 {
+        10
+    }
+
+    let route = invoke::<Routes>(Request::get("/users").body(Body::empty()).unwrap()).unwrap();
+    assert_eq!(
+        route,
+        Routes::UserList {
+            pagination: Pagination {
+                start: 0,
+                count: 10,
+            }
+        }
+    );
+
+    let route =
+        invoke::<Routes>(Request::get("/users?count=30").body(Body::empty()).unwrap()).unwrap();
+    assert_eq!(
+        route,
+        Routes::UserList {
+            pagination: Pagination {
+                start: 0,
+                count: 30,
+            }
+        }
+    );
+
+    let route = invoke::<Routes>(
+        Request::get("/users?start=543")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        route,
+        Routes::UserList {
+            pagination: Pagination {
+                start: 543,
+                count: 10,
+            }
+        }
+    );
+
+    let route = invoke::<Routes>(
+        Request::get("/users?start=123&count=30")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        route,
+        Routes::UserList {
+            pagination: Pagination {
+                start: 123,
+                count: 30,
+            }
+        }
+    );
+}
