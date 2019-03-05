@@ -6,7 +6,7 @@
 //! hyper `Service`:
 //!
 //! ```
-//! use hyper::{Request, Response, Body, service::Service};
+//! use hyper::{Request, Response, Body, Method, service::Service};
 //! use futures::Future;
 //! use from_request::{FromRequest, DefaultFuture, BoxedError, NoContext};
 //!
@@ -29,12 +29,20 @@
 //!     type Future = DefaultFuture<Response<Body>, BoxedError>;
 //!
 //!     fn call(&mut self, req: Request<Body>) -> Self::Future {
+//!         let is_head = req.method() == Method::HEAD;
 //!         let future = Route::from_request(req, NoContext).and_then(|route| Ok(match route {
 //!             Route::Index => Response::new(Body::from("Hello world!")),
 //!             Route::UserInfo { id } => {
 //!                 Response::new(Body::from(format!("User #{} is secret!", id)))
 //!             }
-//!         }));
+//!         })).map(move |resp| {
+//!             if is_head {
+//!                 // Response to HEAD requests must have an empty body
+//!                 resp.map(|_| Body::empty())
+//!             } else {
+//!                 resp
+//!             }
+//!         });
 //!
 //!         Box::new(future)
 //!     }
