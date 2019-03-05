@@ -1,7 +1,48 @@
 //! Composable asynchronous HTTP request routing, guarding and decoding.
 //!
-//! The most interesting thing in this crate is probably [`FromRequest`], so
-//! refer to that for more info.
+//! # Examples
+//!
+//! Use [`FromRequest`] to add a router to your app, and hook it up to your
+//! hyper `Service`:
+//!
+//! ```
+//! use hyper::{Request, Response, Body, service::Service};
+//! use futures::Future;
+//! use from_request::{FromRequest, DefaultFuture, BoxedError, NoContext};
+//!
+//! #[derive(FromRequest)]
+//! enum Route {
+//!     #[get("/")]
+//!     Index,
+//!
+//!     #[get("/users/{id}")]
+//!     UserInfo { id: u32 },
+//! }
+//!
+//! // Define your hyper `Service`:
+//! struct MyService;
+//!
+//! impl Service for MyService {
+//!     type ReqBody = Body;
+//!     type ResBody = Body;
+//!     type Error = BoxedError;
+//!     type Future = DefaultFuture<Response<Body>, BoxedError>;
+//!
+//!     fn call(&mut self, req: Request<Body>) -> Self::Future {
+//!         let future = Route::from_request(req, NoContext).and_then(|route| Ok(match route {
+//!             Route::Index => Response::new(Body::from("Hello world!")),
+//!             Route::UserInfo { id } => {
+//!                 Response::new(Body::from(format!("User #{} is secret!", id)))
+//!             }
+//!         }));
+//!
+//!         Box::new(future)
+//!     }
+//! }
+//! ```
+//!
+//! For detailed documentation on the custom derive syntax, refer to the docs of
+//! [`FromRequest`].
 //!
 //! [`FromRequest`]: trait.FromRequest.html
 
@@ -107,7 +148,7 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// use from_request::{FromRequest, body::Json};
 /// # use serde::Deserialize;
 ///
-/// #[derive(FromRequest)]
+/// #[derive(FromRequest)]  //~ ERROR: route `#[get("/users/me")]` overlaps with ...
 /// enum Routes {
 ///     #[get("/users/{id}")]
 ///     User { id: u32 },
@@ -456,7 +497,6 @@ pub struct NoContext;
 /// ```
 /// # use from_request::RequestContext;
 /// # struct ConnectionPool {}
-/// #
 /// #[derive(RequestContext)]
 /// struct MyContext {
 ///     db: ConnectionPool,
@@ -467,10 +507,8 @@ pub struct NoContext;
 /// ```
 /// # use from_request::RequestContext;
 /// # struct Logger {}
-/// #
 /// # #[derive(RequestContext)]
 /// # struct MyContext {}
-/// #
 /// #[derive(RequestContext)]
 /// struct BigContext {
 ///     #[as_ref]
