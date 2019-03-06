@@ -2,8 +2,8 @@
 //!
 //! # Examples
 //!
-//! Use [`FromRequest`] to add a router to your app, and hook it up to your
-//! hyper `Service`:
+//! Use [`FromRequest`] to add a router to your async app, and hook it up to
+//! your hyper `Service`:
 //!
 //! ```
 //! use hyper::{Request, Response, Body, Method, service::Service};
@@ -31,7 +31,9 @@
 //!     fn call(&mut self, req: Request<Body>) -> Self::Future {
 //!         let is_head = req.method() == Method::HEAD;
 //!         let future = Route::from_request(req, NoContext).and_then(|route| Ok(match route {
-//!             Route::Index => Response::new(Body::from("Hello world!")),
+//!             Route::Index => {
+//!                 Response::new(Body::from("Hello world!"))
+//!             }
 //!             Route::UserInfo { id } => {
 //!                 Response::new(Body::from(format!("User #{} is secret!", id)))
 //!             }
@@ -342,21 +344,17 @@ pub trait FromRequest: Sized {
     /// [`RequestContext`]: trait.RequestContext.html
     type Context: RequestContext;
 
-    /// The result returned by [`from_request`].
+    /// The future returned by [`from_request`].
     ///
     /// Because `impl Trait` cannot be used inside traits (and named
     /// existentential types aren't yet stable), the type here might not be
     /// nameable. In that case, you can set it to
-    /// [`DefaultFuture<Self, Error>`][`DefaultFuture`] and box the returned
-    /// future.
-    ///
-    /// If your `FromRequest` implementation doesn't need to return a future
-    /// (eg. because it's just a parsing step), you can set this to
-    /// `Result<Self, ...>` and immediately return the result of the conversion.
+    /// [`DefaultFuture<Self, BoxedError>`][`DefaultFuture`] and box the
+    /// returned future.
     ///
     /// [`DefaultFuture`]: type.DefaultFuture.html
     /// [`from_request`]: #tymethod.from_request
-    type Result: IntoFuture<Item = Self>;
+    type Future: Future<Item = Self, Error = BoxedError> + Send;
 
     /// Create a `Self` from an HTTP request.
     ///
@@ -368,7 +366,7 @@ pub trait FromRequest: Sized {
     /// * **`request`**: An HTTP request from the `http` crate, containing a
     ///   `hyper::Body`.
     /// * **`context`**: User-defined context.
-    fn from_request(request: http::Request<hyper::Body>, context: Self::Context) -> Self::Result;
+    fn from_request(request: http::Request<hyper::Body>, context: Self::Context) -> Self::Future;
 
     /// Create a `Self` from an HTTP request, synchronously.
     ///
@@ -380,7 +378,7 @@ pub trait FromRequest: Sized {
     fn from_request_sync(
         request: http::Request<hyper::Body>,
         context: Self::Context,
-    ) -> Result<<Self::Result as IntoFuture>::Item, <Self::Result as IntoFuture>::Error> {
+    ) -> Result<Self, BoxedError> {
         let mut rt = Runtime::new().expect("couldn't start single-threaded tokio runtime");
         rt.block_on(Self::from_request(request, context).into_future())
     }
@@ -412,7 +410,7 @@ pub trait Guard: Sized {
     /// If your `FromRequest` implementation doesn't need to return a future
     /// (eg. because it's just a parsing step), you can set this to
     /// `Result<Self, ...>` and immediately return the result of the conversion.
-    type Result: IntoFuture<Item = Self>;
+    type Result: IntoFuture<Item = Self, Error = BoxedError>;
 
     /// Create a `Self` from HTTP request data.
     ///
@@ -458,12 +456,15 @@ pub trait FromBody: Sized {
     /// If your `FromRequest` implementation doesn't need to return a future
     /// (eg. because it's just a parsing step), you can set this to
     /// `Result<Self, ...>` and immediately return the result of the conversion.
-    type Result: IntoFuture<Item = Self>;
+    type Result: IntoFuture<Item = Self, Error = BoxedError>;
 
     /// Create a `Self` from an HTTP request body.
     ///
     /// This will consume the body, so only one `FromBody` type can be used for
     /// every processed request.
+    ///
+    /// **Note**: You probably want to limit the size of the body to prevent
+    /// denial of service attacks.
     ///
     /// # Parameters
     ///

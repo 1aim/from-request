@@ -8,7 +8,7 @@
 // TODO: Who should enforce a Content-Length limit? document that these structs don't.
 // TODO: Add many more types here and make them optional
 
-use crate::{DefaultFuture, BoxedError, FromBody, NoContext};
+use crate::{BoxedError, DefaultFuture, FromBody, NoContext};
 use futures::{Future, Stream};
 use serde::de::DeserializeOwned;
 

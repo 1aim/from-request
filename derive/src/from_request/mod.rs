@@ -260,10 +260,10 @@ pub fn derive_from_request(s: synstructure::Structure) -> TokenStream {
         use core::str::FromStr;
 
         gen impl FromRequest for @Self {
-            type Result = DefaultFuture<Self, BoxedError>;
+            type Future = DefaultFuture<Self, BoxedError>;
             type Context = #context;
 
-            fn from_request(request: http::Request<hyper::Body>, context: Self::Context) -> Self::Result {
+            fn from_request(request: http::Request<hyper::Body>, context: Self::Context) -> Self::Future {
                 // Step 0: `Variants` has all variants of the input enum that have a route attribute
                 // but without any data.
                 enum Variants {

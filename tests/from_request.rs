@@ -1,6 +1,5 @@
 use from_request::{
     body::Json,
-    futures::IntoFuture,
     http::{Method, Request, StatusCode},
     hyper::Body,
     BoxedError, Error, ErrorKind, FromRequest, Guard, NoContext, RequestContext,
@@ -10,9 +9,7 @@ use serde::Deserialize;
 /// Simulates receiving `request`, and decodes a `FromRequest` implementor `T`.
 ///
 /// `T` has to take a `NoContext`.
-fn invoke<T>(
-    request: Request<Body>,
-) -> Result<<T::Result as IntoFuture>::Item, <T::Result as IntoFuture>::Error>
+fn invoke<T>(request: Request<Body>) -> Result<T, BoxedError>
 where
     T: FromRequest<Context = NoContext>,
 {

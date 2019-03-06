@@ -78,9 +78,9 @@ impl Guard for MyGuard {
 #[allow(unused_variables)]
 impl FromRequest for Routes {
     type Context = NoContext;
-    type Result = DefaultFuture<Self, BoxedError>;
+    type Future = DefaultFuture<Self, BoxedError>;
 
-    fn from_request(request: http::Request<hyper::Body>, context: Self::Context) -> Self::Result {
+    fn from_request(request: http::Request<hyper::Body>, context: Self::Context) -> Self::Future {
         // Step 0: `Variant` is `Routes` without the payload.
         enum Variant {
             Index,
