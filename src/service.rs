@@ -12,8 +12,11 @@
 //! [`SyncService`]: struct.SyncService.html
 
 use crate::{BoxedError, DefaultFuture, Error, FromRequest, NoContext};
-use futures::Future;
-use hyper::{service::Service, Body, Method, Request, Response};
+use futures::{future::FutureResult, Future, IntoFuture};
+use hyper::{
+    service::{MakeService, Service},
+    Body, Method, Request, Response,
+};
 use std::fmt;
 use std::sync::Arc;
 
@@ -101,6 +104,42 @@ where
             handler: Arc::new(handler),
             context,
         }
+    }
+}
+
+impl<H, R, F> Clone for AsyncService<H, R, F>
+where
+    H: Fn(R) -> F + Send + Sync + 'static,
+    R: FromRequest,
+    R::Context: Clone,
+    R::Future: 'static,
+    F: Future<Item = Response<Body>, Error = BoxedError> + Send + 'static,
+{
+    fn clone(&self) -> Self {
+        Self {
+            handler: self.handler.clone(),
+            context: self.context.clone(),
+        }
+    }
+}
+
+impl<C, H, R, F> MakeService<C> for AsyncService<H, R, F>
+where
+    H: Fn(R) -> F + Send + Sync + 'static,
+    R: FromRequest,
+    R::Context: Clone,
+    R::Future: 'static,
+    F: Future<Item = Response<Body>, Error = BoxedError> + Send + 'static,
+{
+    type ReqBody = Body;
+    type ResBody = Body;
+    type Error = BoxedError;
+    type Service = Self;
+    type Future = FutureResult<Self, BoxedError>;
+    type MakeError = BoxedError;
+
+    fn make_service(&mut self, _ctx: C) -> Self::Future {
+        Ok(self.clone()).into_future()
     }
 }
 
@@ -197,10 +236,10 @@ where
 }
 
 impl<H, R> SyncService<H, R>
-    where
-        H: Fn(R) -> Response<Body> + Send + Sync + 'static,
-        R: FromRequest + Send + 'static,
-        R::Context: Clone,
+where
+    H: Fn(R) -> Response<Body> + Send + Sync + 'static,
+    R: FromRequest + Send + 'static,
+    R::Context: Clone,
 {
     /// Creates a `SyncService` that will call `handler` to process incoming
     /// requests.
@@ -237,6 +276,38 @@ where
             handler: Arc::new(handler),
             context,
         }
+    }
+}
+
+impl<H, R> Clone for SyncService<H, R>
+where
+    H: Fn(R) -> Response<Body> + Send + Sync + 'static,
+    R: FromRequest + Send + 'static,
+    R::Context: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            handler: self.handler.clone(),
+            context: self.context.clone(),
+        }
+    }
+}
+
+impl<C, H, R> MakeService<C> for SyncService<H, R>
+where
+    H: Fn(R) -> Response<Body> + Send + Sync + 'static,
+    R: FromRequest + Send + 'static,
+    R::Context: Clone,
+{
+    type ReqBody = Body;
+    type ResBody = Body;
+    type Error = BoxedError;
+    type Service = Self;
+    type Future = FutureResult<Self, BoxedError>;
+    type MakeError = BoxedError;
+
+    fn make_service(&mut self, _ctx: C) -> Self::Future {
+        Ok(self.clone()).into_future()
     }
 }
 
