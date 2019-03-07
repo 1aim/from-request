@@ -6,8 +6,7 @@
 //! server without much boilerplate:
 //!
 //! ```
-//! use hyper::{Server, Request, Response, Body, Method};
-//! use hyper::service::service_fn_ok;
+//! use hyper::{Server, Response, Body};
 //! use hyperdrive::{service::AsyncService, FromRequest};
 //! use futures::IntoFuture;
 //!
@@ -38,10 +37,8 @@
 //! code, you can do that by using [`SyncService`]:
 //!
 //! ```
-//! use hyper::{Server, Request, Response, Body, Method};
-//! use hyper::service::service_fn_ok;
+//! use hyper::{Server, Response, Body};
 //! use hyperdrive::{service::SyncService, FromRequest};
-//! use futures::IntoFuture;
 //!
 //! #[derive(FromRequest)]
 //! enum Route {
@@ -131,6 +128,9 @@ TODO:
 
 */
 
+// Deny certain warnings inside doc tests / examples. When this isn't present, rustdoc doesn't show
+// *any* warnings at all.
+#![doc(test(attr(deny(unused_imports, unused_must_use))))]
 #![doc(html_root_url = "https://docs.rs/hyperdrive/0.0.0")]
 #![warn(missing_debug_implementations)]
 #![warn(missing_docs)]
@@ -240,8 +240,7 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// that:
 ///
 /// ```
-/// use hyperdrive::{FromRequest, BoxedError, body::Json};
-/// # use serde::Deserialize;
+/// use hyperdrive::FromRequest;
 /// # use std::str::FromStr;
 /// # use std::num::ParseIntError;
 ///
@@ -333,7 +332,7 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// with the `#[query_params]` attribute:
 ///
 /// ```
-/// use hyperdrive::{FromRequest, body::Json};
+/// use hyperdrive::FromRequest;
 /// # use serde::Deserialize;
 ///
 /// #[derive(FromRequest)]
@@ -376,7 +375,6 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// ```
 /// # struct MyDatabaseConnection;
 /// use hyperdrive::{FromRequest, RequestContext};
-/// # use serde::Deserialize;
 ///
 /// #[derive(RequestContext)]
 /// struct MyContext {
