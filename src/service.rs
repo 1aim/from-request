@@ -213,18 +213,19 @@ where
 
 /// A hyper `Service` that dispatches requests to a blocking handler.
 ///
-/// Just like `AsyncService`, using this type takes a bit of boilerplate away
+/// Just like [`AsyncService`], using this type takes a bit of boilerplate away
 /// from your app. Specifically, it handles:
 ///
 /// * Suppressing the body of the response when the request used `HEAD`.
 /// * Turning any [`from_request::Error`] into a proper HTTP response.
 ///
-/// [`from_request::Error`]: ../struct.Error.html
-///
 /// This is effectively a bridge between async hyper and a synchronous,
 /// blocking app. Writing sync code is much simpler than writing async code
 /// (even with async/await syntax), so depending on your app this might be a
 /// good tradeoff.
+///
+/// [`AsyncService`]: struct.AsyncService.html
+/// [`from_request::Error`]: ../struct.Error.html
 pub struct SyncService<H, R>
 where
     H: Fn(R) -> Response<Body> + Send + Sync + 'static,
