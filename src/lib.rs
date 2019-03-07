@@ -2,6 +2,36 @@
 //!
 //! # Examples
 //!
+//! Use the hyper service adapter [`service::AsyncService`] to create your async
+//! server without much boilerplate:
+//!
+//! ```
+//! use hyper::{Server, Request, Response, Body, Method};
+//! use hyper::service::service_fn_ok;
+//! use from_request::{service::AsyncService, FromRequest};
+//! use futures::IntoFuture;
+//!
+//! #[derive(FromRequest)]
+//! enum Route {
+//!     #[get("/")]
+//!     Index,
+//!
+//!     #[get("/users/{id}")]
+//!     UserInfo { id: u32 },
+//! }
+//!
+//! let srv = Server::bind(&"127.0.0.1:0".parse().unwrap())
+//!     .serve(AsyncService::new(|route: Route| {
+//!         match route {
+//!             Route::Index => Ok(Response::new(Body::from("Hello World!"))).into_future(),
+//!             Route::UserInfo { id } => {
+//!                 // You could do an async database query to fetch the user data here
+//!                 Ok(Response::new(Body::from(format!("User #{}", id)))).into_future()
+//!             }
+//!         }
+//!     }));
+//! ```
+//!
 //! Use [`FromRequest`] to add a router to your async app, and hook it up to
 //! your hyper `Service`:
 //!
