@@ -23,7 +23,9 @@
 //! let srv = Server::bind(&"127.0.0.1:0".parse().unwrap())
 //!     .serve(AsyncService::new(|route: Route| {
 //!         match route {
-//!             Route::Index => Ok(Response::new(Body::from("Hello World!"))).into_future(),
+//!             Route::Index => {
+//!                 Ok(Response::new(Body::from("Hello World!"))).into_future()
+//!             }
 //!             Route::UserInfo { id } => {
 //!                 // You could do an async database query to fetch the user data here
 //!                 Ok(Response::new(Body::from(format!("User #{}", id)))).into_future()
