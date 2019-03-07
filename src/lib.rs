@@ -2,7 +2,7 @@
 //!
 //! # Examples
 //!
-//! Use the hyper service adapter [`service::AsyncService`] to create your async
+//! Use the hyper service adapter [`AsyncService`] to create your async
 //! server without much boilerplate:
 //!
 //! ```
@@ -64,8 +64,9 @@
 //!     }));
 //! ```
 //!
-//! Use [`FromRequest`] to add a router to your async app, and hook it up to
-//! your hyper `Service`:
+//! If the provided service adapters aren't sufficient for your use case, you
+//! can always manually use the [`FromRequest`] methods, and hook it up to your
+//! hyper `Service` manually:
 //!
 //! ```
 //! use hyper::{Request, Response, Body, Method, service::Service};
@@ -116,7 +117,7 @@
 //! For detailed documentation on the custom derive syntax, refer to the docs of
 //! [`FromRequest`].
 //!
-//! [`service::AsyncService`]: service/struct.AsyncService.html
+//! [`AsyncService`]: service/struct.AsyncService.html
 //! [`SyncService`]: service/struct.SyncService.html
 //! [`FromRequest`]: trait.FromRequest.html
 
