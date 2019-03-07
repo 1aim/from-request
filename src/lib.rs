@@ -32,6 +32,38 @@
 //!     }));
 //! ```
 //!
+//! If your app doesn't need to be asynchronous and you'd prefer to write sync
+//! code, you can do that by using [`SyncService`]:
+//!
+//! ```
+//! use hyper::{Server, Request, Response, Body, Method};
+//! use hyper::service::service_fn_ok;
+//! use from_request::{service::SyncService, FromRequest};
+//! use futures::IntoFuture;
+//!
+//! #[derive(FromRequest)]
+//! enum Route {
+//!     #[get("/")]
+//!     Index,
+//!
+//!     #[get("/users/{id}")]
+//!     UserInfo { id: u32 },
+//! }
+//!
+//! let srv = Server::bind(&"127.0.0.1:0".parse().unwrap())
+//!     .serve(SyncService::new(|route: Route| {
+//!         // This closure can block freely, and has to return a `Response<Body>`
+//!         match route {
+//!             Route::Index => {
+//!                 Response::new(Body::from("Hello World!"))
+//!             },
+//!             Route::UserInfo { id } => {
+//!                 Response::new(Body::from(format!("User #{}", id)))
+//!             }
+//!         }
+//!     }));
+//! ```
+//!
 //! Use [`FromRequest`] to add a router to your async app, and hook it up to
 //! your hyper `Service`:
 //!
@@ -84,6 +116,8 @@
 //! For detailed documentation on the custom derive syntax, refer to the docs of
 //! [`FromRequest`].
 //!
+//! [`service::AsyncService`]: service/struct.AsyncService.html
+//! [`SyncService`]: service/struct.SyncService.html
 //! [`FromRequest`]: trait.FromRequest.html
 
 /*
