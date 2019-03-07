@@ -238,16 +238,12 @@ where
 impl<H, R> SyncService<H, R>
 where
     H: Fn(R) -> Response<Body> + Send + Sync + 'static,
-    R: FromRequest + Send + 'static,
-    R::Context: Clone,
+    R: FromRequest<Context = NoContext> + Send + 'static,
 {
     /// Creates a `SyncService` that will call `handler` to process incoming
     /// requests.
-    pub fn new(handler: H, context: R::Context) -> Self {
-        Self {
-            handler: Arc::new(handler),
-            context,
-        }
+    pub fn new(handler: H) -> Self {
+        Self::with_context(handler, NoContext)
     }
 }
 
