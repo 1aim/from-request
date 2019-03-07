@@ -29,7 +29,7 @@ use std::sync::Arc;
 /// it handles:
 ///
 /// * Suppressing the body of the response when the request used `HEAD`.
-/// * Turning any [`from_request::Error`] into a proper HTTP response.
+/// * Turning any [`hyperdrive::Error`] into a proper HTTP response.
 ///
 /// This type stores an async request handler `H` and the context needed by the
 /// [`FromRequest`] implementation. The context is cloned for every request.
@@ -44,7 +44,7 @@ use std::sync::Arc;
 /// * **`F`**: The `Future` returned by the handler closure `H`.
 ///
 /// [`FromRequest`]: ../trait.FromRequest.html
-/// [`from_request::Error`]: ../struct.Error.html
+/// [`hyperdrive::Error`]: ../struct.Error.html
 pub struct AsyncService<H, R, F>
 where
     H: Fn(R) -> F + Send + Sync + 'static,
@@ -217,7 +217,7 @@ where
 /// from your app. Specifically, it handles:
 ///
 /// * Suppressing the body of the response when the request used `HEAD`.
-/// * Turning any [`from_request::Error`] into a proper HTTP response.
+/// * Turning any [`hyperdrive::Error`] into a proper HTTP response.
 ///
 /// This is effectively a bridge between async hyper and a synchronous,
 /// blocking app. Writing sync code is much simpler than writing async code
@@ -225,7 +225,7 @@ where
 /// good tradeoff.
 ///
 /// [`AsyncService`]: struct.AsyncService.html
-/// [`from_request::Error`]: ../struct.Error.html
+/// [`hyperdrive::Error`]: ../struct.Error.html
 pub struct SyncService<H, R>
 where
     H: Fn(R) -> Response<Body> + Send + Sync + 'static,

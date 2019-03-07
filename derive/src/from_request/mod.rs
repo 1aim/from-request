@@ -247,8 +247,8 @@ pub fn derive_from_request(s: synstructure::Structure) -> TokenStream {
         .collect::<Vec<_>>();
 
     s.gen_impl(quote!(
-        extern crate from_request;
-        use from_request::{
+        extern crate hyperdrive;
+        use hyperdrive::{
             FromBody, FromRequest, Guard, DefaultFuture, NoContext,
             ErrorKind, BoxedError, Error,
             http, hyper, lazy_static, regex::{RegexSet, Regex},

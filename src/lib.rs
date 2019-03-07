@@ -8,7 +8,7 @@
 //! ```
 //! use hyper::{Server, Request, Response, Body, Method};
 //! use hyper::service::service_fn_ok;
-//! use from_request::{service::AsyncService, FromRequest};
+//! use hyperdrive::{service::AsyncService, FromRequest};
 //! use futures::IntoFuture;
 //!
 //! #[derive(FromRequest)]
@@ -38,7 +38,7 @@
 //! ```
 //! use hyper::{Server, Request, Response, Body, Method};
 //! use hyper::service::service_fn_ok;
-//! use from_request::{service::SyncService, FromRequest};
+//! use hyperdrive::{service::SyncService, FromRequest};
 //! use futures::IntoFuture;
 //!
 //! #[derive(FromRequest)]
@@ -71,7 +71,7 @@
 //! ```
 //! use hyper::{Request, Response, Body, Method, service::Service};
 //! use futures::Future;
-//! use from_request::{FromRequest, DefaultFuture, BoxedError, NoContext};
+//! use hyperdrive::{FromRequest, DefaultFuture, BoxedError, NoContext};
 //!
 //! #[derive(FromRequest)]
 //! enum Route {
@@ -129,7 +129,7 @@ TODO:
 
 */
 
-#![doc(html_root_url = "https://docs.rs/from-request/0.0.0")]
+#![doc(html_root_url = "https://docs.rs/hyperdrive/0.0.0")]
 #![warn(missing_debug_implementations)]
 #![warn(missing_docs)]
 #![warn(bare_trait_objects)]
@@ -140,7 +140,7 @@ mod gen;
 pub mod service;
 
 pub use error::*;
-pub use from_request_derive::*;
+pub use hyperderive::*;
 
 // Reexport public deps for use by the custom derive
 pub use {futures, http, hyper};
@@ -174,7 +174,7 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// decoder. Here's a simple example:
 ///
 /// ```
-/// use from_request::{FromRequest, body::Json};
+/// use hyperdrive::{FromRequest, body::Json};
 /// # use serde::Deserialize;
 ///
 /// #[derive(FromRequest)]
@@ -238,7 +238,7 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// that:
 ///
 /// ```
-/// use from_request::{FromRequest, BoxedError, body::Json};
+/// use hyperdrive::{FromRequest, BoxedError, body::Json};
 /// # use serde::Deserialize;
 /// # use std::str::FromStr;
 /// # use std::num::ParseIntError;
@@ -272,9 +272,11 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// ## Implicit `HEAD` routes
 ///
 /// The custom derive will create a `HEAD` route for every defined `GET` route,
-/// unless you define one yourself. Since sending back responses is not in scope
-/// of the `from-request` library, you should check the method yourself and only
-/// send back headers if it's a `HEAD` request.
+/// unless you define one yourself. If your app uses [`AsyncService`] or
+/// [`SyncService`], those adapters will automatically take care of dropping the
+/// body from the response. If you manually call
+/// [`FromRequest::from_request`][`from_request`], you have to make sure no body
+/// is sent back for `HEAD` requests.
 ///
 /// ## Extracting Request Data
 ///
@@ -318,9 +320,9 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// },
 /// ```
 ///
-/// The type of the field must implement [`FromBody`]. The [`body` module]
-/// contains predefined adapters implementing that trait, which work with any
-/// type implementing `Deserialize`.
+/// The type of the field must implement [`FromBody`]. The
+/// [`body` module][`body`] contains predefined adapters implementing that
+/// trait, which work with any type implementing `Deserialize`.
 ///
 /// ### Extracting query parameters (`#[query_params]` attribute)
 ///
@@ -329,7 +331,7 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// with the `#[query_params]` attribute:
 ///
 /// ```
-/// use from_request::{FromRequest, body::Json};
+/// use hyperdrive::{FromRequest, body::Json};
 /// # use serde::Deserialize;
 ///
 /// #[derive(FromRequest)]
@@ -371,7 +373,7 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 ///
 /// ```
 /// # struct MyDatabaseConnection;
-/// use from_request::{FromRequest, RequestContext};
+/// use hyperdrive::{FromRequest, RequestContext};
 /// # use serde::Deserialize;
 ///
 /// #[derive(RequestContext)]
@@ -389,12 +391,15 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 ///
 /// For more info on this, refer to the [`RequestContext`] trait.
 ///
+/// [`AsyncService`]: service/struct.AsyncService.html
+/// [`SyncService`]: service/struct.SyncService.html
 /// [`FromBody`]: trait.FromBody.html
 /// [`RequestContext`]: trait.RequestContext.html
 /// [`Guard`]: trait.Guard.html
 /// [`NoContext`]: struct.NoContext.html
 /// [`DefaultFuture`]: type.DefaultFuture.html
-/// [`body` module]: body/index.html
+/// [`body`]: body/index.html
+/// [`from_request`]: #tymethod.from_request
 pub trait FromRequest: Sized {
     /// A context parameter passed to [`from_request`].
     ///
@@ -570,7 +575,7 @@ pub struct NoContext;
 /// Create your own context that allows running database queries in [`Guard`]s
 /// and elsewhere:
 /// ```
-/// # use from_request::RequestContext;
+/// # use hyperdrive::RequestContext;
 /// # struct ConnectionPool {}
 /// #[derive(RequestContext)]
 /// struct MyContext {
@@ -580,7 +585,7 @@ pub struct NoContext;
 ///
 /// Create a context that contains the above context and additional data:
 /// ```
-/// # use from_request::RequestContext;
+/// # use hyperdrive::RequestContext;
 /// # struct Logger {}
 /// # #[derive(RequestContext)]
 /// # struct MyContext {}

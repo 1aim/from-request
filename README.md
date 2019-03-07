@@ -1,8 +1,8 @@
-# `from-request`
+# Hyperdrive
 
-[![crates.io](https://img.shields.io/crates/v/from-request.svg)](https://crates.io/crates/from-request)
-[![docs.rs](https://docs.rs/from-request/badge.svg)](https://docs.rs/from-request/)
-[![Build Status](https://travis-ci.org/1aim/from-request.svg?branch=master)](https://travis-ci.org/1aim/from-request)
+[![crates.io](https://img.shields.io/crates/v/hyperdrive.svg)](https://crates.io/crates/hyperdrive)
+[![docs.rs](https://docs.rs/hyperdrive/badge.svg)](https://docs.rs/hyperdrive/)
+[![Build Status](https://travis-ci.org/1aim/hyperdrive.svg?branch=master)](https://travis-ci.org/1aim/hyperdrive)
 
 This crate provides Rocket-style declarative HTTP request routing and guarding.
 It can be used in both synchronous and fully async apps (using hyper's support

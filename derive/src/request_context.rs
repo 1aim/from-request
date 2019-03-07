@@ -82,8 +82,8 @@ pub fn derive_request_context(s: synstructure::Structure) -> TokenStream {
     };
 
     let asref_nocontext = s.gen_impl(quote!(
-        extern crate from_request;
-        use from_request::NoContext;
+        extern crate hyperdrive;
+        use hyperdrive::NoContext;
 
         gen impl AsRef<NoContext> for @Self {
             fn as_ref(&self) -> &NoContext { &NoContext }
@@ -95,8 +95,8 @@ pub fn derive_request_context(s: synstructure::Structure) -> TokenStream {
         }
     ));
     let request_context = s.gen_impl(quote!(
-        extern crate from_request;
-        use from_request::RequestContext;
+        extern crate hyperdrive;
+        use hyperdrive::RequestContext;
 
         gen impl RequestContext for @Self {}
     ));

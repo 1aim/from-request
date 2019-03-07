@@ -1,10 +1,10 @@
 [package]
-name = "from-request"
+name = "hyperdrive"
 version = "0.0.0"
 authors = ["Jonas Schievink <jonasschievink@gmail.com>"]
 description = "Declarative request routing and decoding with async support"
-documentation = "https://docs.rs/from-request/"
-repository = "https://github.com/1aim/from-request.git"
+documentation = "https://docs.rs/hyperdrive/"
+repository = "https://github.com/1aim/hyperdrive.git"
 keywords = ["async", "http", "request", "router", "guard"]
 categories = ["web-programming::http-server"]
 readme = "README.md"
@@ -23,7 +23,7 @@ serde = { version = "1.0.88", features = ["derive"] }
 serde_json = "1.0.38"
 serde_urlencoded = "0.5.4"
 
-[dependencies.from-request-derive]
+[dependencies.hyperderive]
 path = "derive"
 version = "=0.0.0" # AUTOBUMP
 
@@ -48,14 +48,14 @@ replace = "## Unreleased\n\nNo changes.\n\n## {{version}} - {{date}}"
 # Bump the version inside the example manifest in `README.md`
 [[package.metadata.release.pre-release-replacements]]
 file    = "README.md"
-search  = 'from-request = "[a-z0-9\\.-]+"'
-replace = 'from-request = "{{version}}"'
+search  = 'hyperdrive = "[a-z0-9\\.-]+"'
+replace = 'hyperdrive = "{{version}}"'
 
 # Bump the version referenced by the `html_root_url` attribute in `lib.rs`
 [[package.metadata.release.pre-release-replacements]]
 file    = "src/lib.rs"
-search  = "https://docs.rs/from-request/[a-z0-9\\.-]+"
-replace = "https://docs.rs/from-request/{{version}}"
+search  = "https://docs.rs/hyperdrive/[a-z0-9\\.-]+"
+replace = "https://docs.rs/hyperdrive/{{version}}"
 
 [[package.metadata.release.pre-release-replacements]]
 file    = "Cargo.toml"

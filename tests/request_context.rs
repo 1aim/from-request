@@ -2,7 +2,7 @@
 //!
 //! Negative tests are in the derive implementation.
 
-use from_request::RequestContext;
+use hyperdrive::RequestContext;
 
 fn assert_impls<T: RequestContext>() {}
 

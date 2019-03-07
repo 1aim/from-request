@@ -1,9 +1,9 @@
-//! The custom derive powering the [`from-request`] crate.
+//! The custom derive powering the [`hyperdrive`] crate.
 //!
 //! You should never use this crate directly. It does not expose a stable API
-//! and may break at any time. Use `from-request` directly instead.
+//! and may break at any time. Use `hyperdrive` directly instead.
 //!
-//! [`from-request`]: https://docs.rs/from-request
+//! [`hyperdrive`]: https://docs.rs/hyperdrive
 
 #![recursion_limit = "256"]
 
