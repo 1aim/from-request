@@ -28,7 +28,7 @@ path = "derive"
 version = "=0.0.0" # AUTOBUMP
 
 [dev-dependencies]
-version-sync = "0.7"
+version-sync = "0.8"
 
 [workspace]
 
