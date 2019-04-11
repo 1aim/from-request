@@ -1,6 +1,6 @@
-use proc_macro2::{TokenStream, Literal};
+use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
-use syn::{Attribute, Data, Meta};
+use syn::{Attribute, Data, Index, Meta};
 
 pub fn derive_request_context(s: synstructure::Structure) -> TokenStream {
     deny_attr("as_ref", &s.ast().attrs);
@@ -40,7 +40,7 @@ pub fn derive_request_context(s: synstructure::Structure) -> TokenStream {
                         let field_name = if let Some(name) = &field.ident {
                             quote!(#name)
                         } else {
-                            let index = Literal::usize_unsuffixed(index);
+                            let index = Index::from(index);
                             quote!(#index)
                         };
                         impls.push(s.gen_impl(quote! {
