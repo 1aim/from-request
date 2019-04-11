@@ -181,4 +181,45 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    #[should_panic(expected = "invalid syntax for #[as_ref] attribute on field `field`")]
+    fn invalid1() {
+        expand! {
+            struct MyStruct {
+                #[as_ref = "no"]
+                field: u8,
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid syntax for #[as_ref] attribute on field of type `u8`")]
+    fn invalid2() {
+        expand! {
+            struct MyStruct(#[as_ref = "aaa"] u8);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "too many #[as_ref] attributes on `field1`")]
+    fn invalid3_too_many() {
+        expand! {
+            struct MyStruct {
+                field0: u8,
+
+                #[as_ref]
+                #[as_ref]
+                field1: u8,
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "too many #[as_ref] attributes on `u8`")]
+    fn invalid4_too_many() {
+        expand! {
+            struct MyStruct(#[as_ref] #[as_ref] u8);
+        }
+    }
 }
