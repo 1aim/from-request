@@ -17,6 +17,8 @@ use from_request::derive_from_request;
 use request_context::derive_request_context;
 
 decl_derive!([FromRequest, attributes(
+    // Attributes need to be kept in sync with from_request/parse.rs
+
     context, body, query_params,
 
     // We support all HTTP verbs from RFC 7231 as well as PATCH

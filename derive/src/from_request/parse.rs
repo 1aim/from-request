@@ -6,6 +6,8 @@ use std::{fmt, slice};
 use syn::{Attribute, Lit, Meta, NestedMeta};
 use synstructure::VariantAst;
 
+// Attributes need to be kept in sync with lib.rs
+
 const METHOD_ATTRS: &[&str] = &[
     "get", "head", "post", "put", "delete", "connect", "options", "trace", "patch",
 ];
