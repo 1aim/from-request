@@ -455,20 +455,27 @@ pub trait FromRequest: Sized {
     }
 }
 
-/// A request guard that asynchronously checks a condition of an incoming
+/// A request guard that checks a condition or extracts data out of an incoming
 /// request.
 ///
 /// For example, this could be used to extract an `Authorization` header and
 /// verify user credentials, or to look up a session token in a database.
 ///
+/// A `Guard` can not access the request body. If you need to do that, refer to
+/// [`FromBody`] instead.
+///
 /// TODO: Better docs and examples
+///
+/// [`FromBody`]: trait.FromBody.html
 pub trait Guard: Sized {
     /// A context parameter passed to `from_request`.
     ///
     /// This can be used to pass application-specific data like a logger or a
     /// database connection around.
     ///
-    /// If no context is needed, this should be set to `NoContext`.
+    /// If no context is needed, this should be set to [`NoContext`].
+    ///
+    /// [`NoContext`]: struct.NoContext.html
     type Context: RequestContext;
 
     /// The result returned by `from_request`.
@@ -549,20 +556,26 @@ pub trait FromBody: Sized {
     ) -> Self::Result;
 }
 
-/// Default context used by [`FromRequest`] implementations.
+/// A default [`RequestContext`] containing no data.
 ///
-/// This context type should be used whenever no application-specific context is
-/// needed. It can be created from any parent context via `AsRef`.
+/// This context type should be used in [`FromRequest`], [`FromBody`] and
+/// [`Guard`] implementations whenever no application-specific context is
+/// needed. It can be created from any [`RequestContext`] via
+/// `AsRef<NoContext>`.
 ///
 /// [`FromRequest`]: trait.FromRequest.html
+/// [`FromBody`]: trait.FromBody.html
+/// [`Guard`]: trait.Guard.html
+/// [`RequestContext`]: trait.RequestContext.html
 #[derive(Debug, Copy, Clone, Default)]
 pub struct NoContext;
 
-/// Trait for context types passed to [`FromRequest`].
+/// Trait for context types passed to [`FromRequest`], [`FromBody`] and
+/// [`Guard`].
 ///
 /// # `#[derive(RequestContext)]`
 ///
-/// This trait can be derived automatically. This will automatically implement
+/// This trait can be derived automatically. This will also implement
 /// `AsRef<Self>` and `AsRef<NoContext>`.
 ///
 /// On structs, fields can also be annotated using `#[as_ref]`, which generates
@@ -597,7 +610,7 @@ pub struct NoContext;
 /// }
 /// ```
 /// This context can be used in the same places where `MyContext` is accepted,
-/// but provides additional data that may be used only by some [`Guard`],
+/// but provides additional data that may be used only by a few [`Guard`],
 /// [`FromRequest`] or [`FromBody`] implementations.
 ///
 /// [`Guard`]: trait.Guard.html
