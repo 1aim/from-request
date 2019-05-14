@@ -293,14 +293,14 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// In a route attribute, the `{field}` placeholder syntax will match a path
 /// segment and convert it to the type of the named field using `FromStr`:
 ///
-/// ```ignore
+/// ```notrust
 /// #[get("/users/{id}")]
 /// ```
 ///
 /// To extract multiple path segments this way, the `{field...}` syntax can be
 /// used at the end of the path, which will consume the rest of the path:
 ///
-/// ```ignore
+/// ```notrust
 /// #[get("/static/{path...}")]
 /// ```
 ///
@@ -313,7 +313,7 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// Putting `#[body]` on a field of a variant will deserialize the request body
 /// using the [`FromBody`] trait and store the result in the annotated field:
 ///
-/// ```ignore
+/// ```notrust
 /// #[post("/login")]
 /// Login {
 ///     #[body]
