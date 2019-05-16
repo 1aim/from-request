@@ -141,7 +141,7 @@ impl VariantData {
                 .is_none()
             {
                 panic!(
-                    "placeholder `:{}` does not refer to an existing field on variant `{}`",
+                    "placeholder `{{{}}}` does not refer to an existing field on variant `{}`",
                     placeholder, ast.ident,
                 );
             }

@@ -566,6 +566,19 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(
+        expected = r#"placeholder `{pl}` does not refer to an existing field on variant `Variant`"#
+    )]
+    fn no_placeholder_field() {
+        expand! {
+            enum Routes {
+                #[get("/{pl}")]
+                Variant,
+            }
+        }
+    }
+
+    #[test]
     #[should_panic(expected = "duplicate placeholders")]
     fn dup_placeholder() {
         expand! {
