@@ -127,7 +127,6 @@ TODO:
 * Good example that fetches a session from a DB
 
 */
-
 // Deny certain warnings inside doc tests / examples. When this isn't present, rustdoc doesn't show
 // *any* warnings at all.
 #![doc(test(attr(deny(unused_imports, unused_must_use))))]

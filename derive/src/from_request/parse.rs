@@ -37,7 +37,7 @@ pub struct ItemData {
 }
 
 impl ItemData {
-    pub fn parse(attrs: &[Attribute]) -> Self {
+    pub fn parse(attrs: &[Attribute], is_struct: bool) -> Self {
         let mut context = None;
 
         for attr in attrs {
@@ -45,8 +45,11 @@ impl ItemData {
             if name == "context" {
                 let ty = syn::parse2(attr.tts.clone()).expect("#[context] must be given a type");
                 insert("#[context]", &mut context, ty);
-            } else if known_attr(&name) {
-                panic!("#[{}] is not valid on items", name);
+            } else if known_attr(&name) && !is_struct {
+                panic!(
+                    "`#[{}]` is not valid on enums (did you mean to place it on a variant instead?)",
+                    name
+                );
             }
         }
 
@@ -81,7 +84,7 @@ enum FieldKind {
 }
 
 impl VariantData {
-    pub fn parse(ast: &VariantAst) -> Self {
+    pub fn parse(ast: &VariantAst, is_struct: bool) -> Self {
         // Collect all the route attributes on the variant
         let mut routes = Vec::new();
         for attr in ast.attrs {
@@ -93,8 +96,8 @@ impl VariantData {
                         &list.nested.iter().collect::<Vec<_>>(),
                     ));
                 }
-                _ if known_attr(&meta.name()) => {
-                    panic!("#[{}] is not valid on enum variants", meta.name())
+                _ if known_attr(&meta.name()) && !is_struct => {
+                    panic!("`#[{}]` is not valid on enum variants", meta.name())
                 }
                 _ => {}
             }

@@ -72,21 +72,23 @@ use self::parse::{ItemData, PathMap, VariantData};
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 use std::iter;
-use syn::Variant;
+use synstructure::{Structure, VariantInfo};
 
-pub fn derive_from_request(s: synstructure::Structure) -> TokenStream {
-    let en = match &s.ast().data {
-        syn::Data::Struct(_) | syn::Data::Union(_) => {
-            panic!("#[derive(FromRequest)] is only allowed on enums")
+pub fn derive_from_request(s: Structure) -> TokenStream {
+    let is_struct;
+    match &s.ast().data {
+        syn::Data::Union(_) => {
+            panic!("#[derive(FromRequest)] is not allowed on unions");
         }
-        syn::Data::Enum(en) => en,
-    };
+        syn::Data::Struct(_) => is_struct = true,
+        syn::Data::Enum(_) => is_struct = false,
+    }
 
     if !s.ast().generics.params.is_empty() {
         panic!("#[derive(FromRequest)] does not support generic types");
     }
 
-    let item_data = ItemData::parse(&s.ast().attrs);
+    let item_data = ItemData::parse(&s.ast().attrs, is_struct);
 
     let context = item_data.context().cloned().unwrap_or_else(|| {
         syn::parse_str("NoContext").expect("internal error: couldn't parse type")
@@ -96,11 +98,15 @@ pub fn derive_from_request(s: synstructure::Structure) -> TokenStream {
         .variants()
         .iter()
         .map(|variant| {
-            let data = VariantData::parse(&variant.ast());
+            let data = VariantData::parse(&variant.ast(), is_struct);
             if !data.routes().is_empty() {
                 // can be created by us
                 match &variant.ast().fields {
-                    syn::Fields::Unnamed(_) => panic!("tuple variants are not supported"),
+                    syn::Fields::Unnamed(_) => panic!(
+                        "tuple variants are not supported (`{}::{}`)",
+                        s.ast().ident,
+                        variant.ast().ident
+                    ),
                     _ => {}
                 }
             }
@@ -114,10 +120,16 @@ pub fn derive_from_request(s: synstructure::Structure) -> TokenStream {
         .collect::<Vec<_>>();
     let all_regexes = &all_regexes;
 
+    // Ensure that there's at least 1 way for us to instantiate the type
     if pathmap.paths().next().is_none() {
-        // No route attributes. This situation would lead to "cannot infer type
-        // for `T`" errors.
-        panic!("at least one route attribute must be used");
+        // Not a single route attribute in the entire item. This situation would lead to "cannot
+        // infer type for `T`" errors.
+        let what = if is_struct {
+            "struct"
+        } else {
+            "at least one variant of"
+        };
+        panic!("{} `{}` must have a route attribute", what, s.ast().ident);
     }
 
     let capturing_regexes = pathmap
@@ -235,15 +247,15 @@ pub fn derive_from_request(s: synstructure::Structure) -> TokenStream {
         })
         .collect::<Vec<_>>();
 
-    let variant_arms = en
-        .variants
+    let variant_arms = s
+        .variants()
         .iter()
         .zip(&variant_data)
         .filter_map(|(variant, data)| {
             if data.routes().is_empty() {
                 None
             } else {
-                Some(construct_variant(&s.ast().ident, variant, data))
+                Some(construct_variant(variant, data))
             }
         })
         .collect::<Vec<_>>();
@@ -333,7 +345,7 @@ pub fn derive_from_request(s: synstructure::Structure) -> TokenStream {
 ///   * Chain all calls to the `from_request` methods
 /// * If it has a `body`
 ///   * Chain the call to its `from_body` method
-fn construct_variant(type_name: &Ident, variant: &Variant, data: &VariantData) -> TokenStream {
+fn construct_variant(variant: &VariantInfo, data: &VariantData) -> TokenStream {
     // Must have at least 1 route, otherwise we wouldn't be here
     let route = data
         .routes()
@@ -342,6 +354,7 @@ fn construct_variant(type_name: &Ident, variant: &Variant, data: &VariantData) -
 
     let field_by_name = |name: &Ident| -> &syn::Field {
         variant
+            .ast()
             .fields
             .iter()
             .find(|field| field.ident.as_ref() == Some(name))
@@ -403,24 +416,17 @@ fn construct_variant(type_name: &Ident, variant: &Variant, data: &VariantData) -
     // Last step, chain all the asynchronous operations (guards and body).
     // Reverse order because we have to chain everything with `.and_then`.
 
-    // Construct the final value
-    let variant_name = &variant.ident;
-    let (fields, field_variables): (Vec<_>, Vec<_>) = variant
-        .fields
-        .iter()
-        .filter_map(|field| field.ident.as_ref())
-        .map(|field| {
-            (
-                field,
-                Ident::new(&format!("fld_{}", field), Span::call_site()),
-            )
-        })
-        .unzip();
+    // Construct the final value from the `fld_X` variables
+    let construct = variant.construct(|field, index| {
+        let name = if let Some(ident) = &field.ident {
+            ident.to_string()
+        } else {
+            index.to_string()
+        };
+        Ident::new(&format!("fld_{}", name), Span::call_site())
+    });
     let mut future = quote! {
-        Ok(#type_name::#variant_name {
-            #(#fields: #field_variables,)*
-        })
-        .into_future()
+        Ok(#construct).into_future()
     };
 
     // Read the body
@@ -483,14 +489,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "#[derive(FromRequest)] is only allowed on enums")]
-    fn on_struct() {
-        expand! {
-            struct MyStruct {}
-        }
-    }
-
-    #[test]
     #[should_panic(expected = "synstructure does not handle untagged unions")]
     // FIXME bad error message
     fn on_union() {
@@ -515,7 +513,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "#[context] is not valid on enum variants")]
+    #[should_panic(expected = "`#[context]` is not valid on enum variants")]
     fn context_attr_on_variant() {
         expand! {
             enum Routes {
@@ -526,12 +524,20 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "at least one route attribute must be used")]
-    fn no_route() {
+    #[should_panic(expected = "at least one variant of `Routes` must have a route attribute")]
+    fn no_route_enum() {
         expand! {
             enum Routes {
                 Variant,
             }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "struct `MyStruct` must have a route attribute")]
+    fn no_route_struct() {
+        expand! {
+            struct MyStruct {}
         }
     }
 

@@ -16,6 +16,13 @@ where
     T::from_request_sync(request, NoContext)
 }
 
+fn invoke_with<T>(request: Request<Body>, context: T::Context) -> Result<T, BoxedError>
+where
+    T: FromRequest,
+{
+    T::from_request_sync(request, context)
+}
+
 #[derive(Debug)]
 struct MyGuard;
 
@@ -29,8 +36,9 @@ impl Guard for MyGuard {
     }
 }
 
+/// A few demo routes for user management (login, user info, user edit).
 #[test]
-fn test() {
+fn user_app() {
     #[derive(FromRequest, Debug)]
     #[allow(dead_code)]
     enum Routes {
@@ -126,9 +134,8 @@ fn test() {
 /// `NoContext` instead.
 #[test]
 fn context() {
-    #[derive(FromRequest)]
+    #[derive(FromRequest, Debug)]
     #[context(SpecialContext)]
-    #[allow(dead_code)]
     enum Routes {
         #[get("/")]
         Variant {
@@ -139,10 +146,10 @@ fn context() {
         },
     }
 
-    #[derive(RequestContext)]
-    #[allow(dead_code)]
+    #[derive(RequestContext, Debug)]
     struct SpecialContext;
 
+    #[derive(Debug)]
     struct SpecialGuard;
 
     impl Guard for SpecialGuard {
@@ -154,6 +161,57 @@ fn context() {
             Ok(SpecialGuard)
         }
     }
+
+    invoke_with::<Routes>(
+        Request::get("/").body(Body::empty()).unwrap(),
+        SpecialContext,
+    )
+    .unwrap();
+    invoke_with::<Routes>(
+        Request::get("/bla").body(Body::empty()).unwrap(),
+        SpecialContext,
+    )
+    .unwrap_err();
+}
+
+#[test]
+fn struct_context() {
+    #[derive(FromRequest, Debug)]
+    #[context(SpecialContext)]
+    #[get("/")]
+    struct Route {
+        /// Takes a `SpecialContext`.
+        special: SpecialGuard,
+        /// Takes a `NoContext`.
+        normal: MyGuard,
+    }
+
+    #[derive(RequestContext, Debug)]
+    struct SpecialContext;
+
+    #[derive(Debug)]
+    struct SpecialGuard;
+
+    impl Guard for SpecialGuard {
+        type Context = SpecialContext;
+
+        type Result = Result<Self, BoxedError>;
+
+        fn from_request(_request: &http::Request<()>, _context: &Self::Context) -> Self::Result {
+            Ok(SpecialGuard)
+        }
+    }
+
+    invoke_with::<Route>(
+        Request::get("/").body(Body::empty()).unwrap(),
+        SpecialContext,
+    )
+    .unwrap();
+    invoke_with::<Route>(
+        Request::get("/bla").body(Body::empty()).unwrap(),
+        SpecialContext,
+    )
+    .unwrap_err();
 }
 
 #[test]
@@ -187,8 +245,16 @@ fn asterisk() {
     }
 
     invoke::<Routes>(Request::options("*").body(Body::empty()).unwrap()).unwrap();
-
     invoke::<Routes>(Request::options("/").body(Body::empty()).unwrap()).unwrap_err();
+    invoke::<Routes>(Request::head("/").body(Body::empty()).unwrap()).unwrap_err();
+
+    #[derive(FromRequest, Debug)]
+    #[options("*")]
+    struct Options;
+
+    invoke::<Options>(Request::options("*").body(Body::empty()).unwrap()).unwrap();
+    invoke::<Options>(Request::options("/").body(Body::empty()).unwrap()).unwrap_err();
+    invoke::<Options>(Request::head("/").body(Body::empty()).unwrap()).unwrap_err();
 }
 
 #[test]
