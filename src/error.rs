@@ -97,7 +97,7 @@ impl Error {
 }
 
 impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.source {
             None => write!(f, "{}", self.kind),
             Some(source) => write!(f, "{}: {}", self.kind, source),
@@ -146,7 +146,7 @@ impl ErrorKind {
 }
 
 impl fmt::Display for ErrorKind {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             ErrorKind::PathSegment => "failed to parse data in path segment",
             ErrorKind::QueryParam => "failed to parse query parameters",

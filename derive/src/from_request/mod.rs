@@ -74,7 +74,7 @@ use quote::quote;
 use std::iter;
 use synstructure::{Structure, VariantInfo};
 
-pub fn derive_from_request(s: Structure) -> TokenStream {
+pub fn derive_from_request(s: Structure<'_>) -> TokenStream {
     let is_struct;
     match &s.ast().data {
         syn::Data::Union(_) => {
@@ -345,7 +345,7 @@ pub fn derive_from_request(s: Structure) -> TokenStream {
 ///   * Chain all calls to the `from_request` methods
 /// * If it has a `body`
 ///   * Chain the call to its `from_body` method
-fn construct_variant(variant: &VariantInfo, data: &VariantData) -> TokenStream {
+fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStream {
     // Must have at least 1 route, otherwise we wouldn't be here
     let route = data
         .routes()

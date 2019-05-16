@@ -1,8 +1,9 @@
 use proc_macro2::TokenStream;
 use quote::{quote, ToTokens};
 use syn::{Attribute, Data, Index, Meta};
+use synstructure::Structure;
 
-pub fn derive_request_context(s: synstructure::Structure) -> TokenStream {
+pub fn derive_request_context(s: Structure<'_>) -> TokenStream {
     deny_attr("as_ref", &s.ast().attrs);
     let additional_impls = match &s.ast().data {
         Data::Struct(st) => {

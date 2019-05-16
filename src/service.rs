@@ -189,7 +189,7 @@ where
     R::Future: 'static,
     F: Future<Item = Response<Body>, Error = BoxedError> + Send + 'static,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Closures aren't debug-printable, so we print a few Arc stats instead
 
         #[derive(Debug)]
@@ -358,7 +358,7 @@ where
     R: FromRequest + Send + 'static,
     R::Context: Clone + fmt::Debug,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Closures aren't debug-printable, so we print a few Arc stats instead
 
         #[derive(Debug)]

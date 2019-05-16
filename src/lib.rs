@@ -133,7 +133,7 @@ TODO:
 #![doc(html_root_url = "https://docs.rs/hyperdrive/0.0.0")]
 #![warn(missing_debug_implementations)]
 #![warn(missing_docs)]
-#![warn(bare_trait_objects)]
+#![warn(rust_2018_idioms)]
 
 pub mod body;
 mod error;

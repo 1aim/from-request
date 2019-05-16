@@ -6,6 +6,7 @@
 //! [`hyperdrive`]: https://docs.rs/hyperdrive
 
 #![recursion_limit = "256"]
+#![warn(rust_2018_idioms)]
 
 use synstructure::decl_derive;
 

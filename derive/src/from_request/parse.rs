@@ -84,7 +84,7 @@ enum FieldKind {
 }
 
 impl VariantData {
-    pub fn parse(ast: &VariantAst, is_struct: bool) -> Self {
+    pub fn parse(ast: &VariantAst<'_>, is_struct: bool) -> Self {
         // Collect all the route attributes on the variant
         let mut routes = Vec::new();
         for attr in ast.attrs {
@@ -290,7 +290,7 @@ impl Route {
 }
 
 impl fmt::Display for Route {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let method = self.method.to_string().to_lowercase();
         if is_method(&self.method) {
             write!(f, "#[{}(\"{}\")]", method, self.path.raw)
@@ -631,7 +631,7 @@ impl PathMap {
     }
 
     /// Returns an iterator over all unique paths in this map.
-    pub fn paths(&self) -> impl Iterator<Item = PathInfo> {
+    pub fn paths(&self) -> impl Iterator<Item = PathInfo<'_>> {
         self.regex_map.iter().map(|(regex, method_map)| PathInfo {
             regex: regex.as_ref(),
             method_map,
