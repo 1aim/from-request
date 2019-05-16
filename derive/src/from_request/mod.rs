@@ -1,6 +1,8 @@
 //! `FromRequest` derive.
 //!
-//! ```ignore
+//! Usage sketch (see main crate for real docs):
+//!
+//! ```notrust
 //! #[derive(FromRequest)]
 //! enum Routes {
 //!     #[get("/")]
