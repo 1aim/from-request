@@ -137,7 +137,6 @@ TODO:
 
 pub mod body;
 mod error;
-mod gen;
 pub mod service;
 
 pub use error::*;
