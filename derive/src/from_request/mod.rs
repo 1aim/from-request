@@ -221,7 +221,8 @@ pub fn derive_from_request(s: Structure<'_>) -> TokenStream {
                             ]).into_future(),
                         }
                     } else {
-                        // FIXME determine the allowed routes
+                        // We have placeholders; check the request path against all variants that
+                        // share the same path pattern
                         let (variants, methods): (Vec<_>, Vec<_>) = pathinfo
                             .method_map()
                             .map(|(method, variant)| (variant.variant_name(), method))
@@ -285,6 +286,10 @@ pub fn derive_from_request(s: Structure<'_>) -> TokenStream {
                 }
 
                 impl Variants {
+                    /// Returns whether `self`, with `regex`, matches `path`.
+                    ///
+                    /// This checks all path placeholder's `FromStr` implementations against the
+                    /// path segments and returns `true` if they all succeed.
                     fn matches_path(&self, regex: &Regex, path: &str) -> bool {
                         match self {
                             #( Variants::#variants => { #variant_matches_path } )*
