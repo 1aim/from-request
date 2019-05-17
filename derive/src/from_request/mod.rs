@@ -235,7 +235,7 @@ pub fn derive_from_request(s: Structure<'_>) -> TokenStream {
                                 let mut methods = Vec::new();
 
                                 #(
-                                    if Variants::#variants.matches_path(regex, path) {
+                                    if variant_matches_path(Variants::#variants, regex, path) {
                                         methods.push(&http::Method::#methods);
                                     }
                                 )*
@@ -285,17 +285,18 @@ pub fn derive_from_request(s: Structure<'_>) -> TokenStream {
                     #(#variants,)*
                 }
 
-                impl Variants {
-                    /// Returns whether `self`, with `regex`, matches `path`.
-                    ///
-                    /// This checks all path placeholder's `FromStr` implementations against the
-                    /// path segments and returns `true` if they all succeed.
-                    fn matches_path(&self, regex: &Regex, path: &str) -> bool {
-                        match self {
-                            #( Variants::#variants => { #variant_matches_path } )*
-                        }
+                // Returns whether `self`, with `regex`, matches `path`.
+                //
+                // This checks all path placeholder's `FromStr` implementations against the
+                // path segments and returns `true` if they all succeed.
+                //
+                // This is a closure instead of a function to allow use of the `impl`-level generics
+                // (if any).
+                let variant_matches_path = |var: Variants, regex: &Regex, path: &str| -> bool {
+                    match var {
+                        #( Variants::#variants => { #variant_matches_path } )*
                     }
-                }
+                };
 
                 // Step 1: Match against the generated regex set and inspect the HTTP
                 // method in order to find the route that matches.
