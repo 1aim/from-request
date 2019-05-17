@@ -206,7 +206,7 @@ pub fn derive_from_request(s: Structure<'_>) -> TokenStream {
                 .map(move |(method, variant)| {
                     let variant = &variant.variant_name();
                     quote! {
-                        (#i, &http::Method::#method) => Variants::#variant,
+                        (#i, &http::Method::#method) => Variant::#variant,
                     }
                 })
                 .chain(iter::once({
@@ -235,7 +235,7 @@ pub fn derive_from_request(s: Structure<'_>) -> TokenStream {
                                 let mut methods = Vec::new();
 
                                 #(
-                                    if variant_matches_path(Variants::#variants, regex, path) {
+                                    if variant_matches_path(Variant::#variants, regex, path) {
                                         methods.push(&http::Method::#methods);
                                     }
                                 )*
@@ -279,9 +279,9 @@ pub fn derive_from_request(s: Structure<'_>) -> TokenStream {
             type Context = #context;
 
             fn from_request(request: http::Request<hyper::Body>, context: Self::Context) -> Self::Future {
-                // Step 0: `Variants` has all variants of the input enum that have a route attribute
+                // Step 0: `Variant` has all variants of the input enum that have a route attribute
                 // but without any data.
-                enum Variants {
+                enum Variant {
                     #(#variants,)*
                 }
 
@@ -292,9 +292,9 @@ pub fn derive_from_request(s: Structure<'_>) -> TokenStream {
                 //
                 // This is a closure instead of a function to allow use of the `impl`-level generics
                 // (if any).
-                let variant_matches_path = |var: Variants, regex: &Regex, path: &str| -> bool {
+                let variant_matches_path = |var: Variant, regex: &Regex, path: &str| -> bool {
                     match var {
-                        #( Variants::#variants => { #variant_matches_path } )*
+                        #( Variant::#variants => { #variant_matches_path } )*
                     }
                 };
 
@@ -329,7 +329,7 @@ pub fn derive_from_request(s: Structure<'_>) -> TokenStream {
                 };
 
                 match variant {
-                    #( Variants::#variants => #variant_arms, )*
+                    #( Variant::#variants => #variant_arms, )*
                 }
             }
         }
