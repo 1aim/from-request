@@ -68,13 +68,13 @@
 
 mod parse;
 
-use self::parse::{ItemData, PathMap, VariantData};
+use self::parse::{FieldKind, ItemData, PathMap, VariantData};
 use proc_macro2::{Ident, Span, TokenStream};
-use quote::quote;
+use quote::{quote, ToTokens};
 use std::iter;
-use synstructure::{Structure, VariantInfo};
+use synstructure::{AddBounds, Structure, VariantInfo};
 
-pub fn derive_from_request(s: Structure<'_>) -> TokenStream {
+pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
     let is_struct;
     match &s.ast().data {
         syn::Data::Union(_) => {
@@ -82,10 +82,6 @@ pub fn derive_from_request(s: Structure<'_>) -> TokenStream {
         }
         syn::Data::Struct(_) => is_struct = true,
         syn::Data::Enum(_) => is_struct = false,
-    }
-
-    if !s.ast().generics.params.is_empty() {
-        panic!("#[derive(FromRequest)] does not support generic types");
     }
 
     let item_data = ItemData::parse(&s.ast().attrs, is_struct);
@@ -261,6 +257,20 @@ pub fn derive_from_request(s: Structure<'_>) -> TokenStream {
         })
         .collect::<Vec<_>>();
 
+    // Don't automatically add bounds, we'll do that ourselves
+    s.add_bounds(AddBounds::None);
+
+    let bounds = generate_trait_bounds(&item_data, &variant_data);
+
+    let where_clause = if s.ast().generics.type_params().next().is_none() {
+        // Don't add where clause if there are no generics
+        TokenStream::new()
+    } else {
+        quote! {
+            where #(#bounds),*
+        }
+    };
+
     s.gen_impl(quote!(
         extern crate hyperdrive;
         use hyperdrive::{
@@ -274,7 +284,7 @@ pub fn derive_from_request(s: Structure<'_>) -> TokenStream {
         use core::convert::AsRef;
         use core::str::FromStr;
 
-        gen impl FromRequest for @Self {
+        gen impl FromRequest for @Self #where_clause {
             type Future = DefaultFuture<Self, BoxedError>;
             type Context = #context;
 
@@ -334,6 +344,84 @@ pub fn derive_from_request(s: Structure<'_>) -> TokenStream {
             }
         }
     ))
+}
+
+fn generate_trait_bounds(item: &ItemData, variants: &[VariantData]) -> Vec<TokenStream> {
+    let context = item
+        .context()
+        .map(|c| c.into_token_stream())
+        .unwrap_or_else(|| quote!(::hyperdrive::NoContext));
+
+    variants
+        .iter()
+        .flat_map(|v| v.field_uses())
+        .flat_map(|(field, field_kind)| {
+            let ty = field.ty.clone();
+            match field_kind {
+                FieldKind::PathSegment => vec![
+                    quote!( #ty:
+                        ::std::str::FromStr + ::std::marker::Send + 'static
+                    ),
+                    quote!( <#ty as ::std::str::FromStr>::Err:
+                        ::std::error::Error + ::std::marker::Sync + ::std::marker::Send + 'static
+                    ),
+                ],
+                FieldKind::QueryParams => vec![quote!( #ty:
+                    ::hyperdrive::serde::de::DeserializeOwned +
+                    ::std::marker::Send +
+                    'static
+                )],
+                FieldKind::Body => {
+                    vec![
+                        quote!( #ty:
+                            ::hyperdrive::FromBody +
+                            ::std::marker::Send +
+                            'static
+                        ),
+                        quote!( #context: AsRef<<#ty as ::hyperdrive::FromBody>::Context> ),
+                        // better implied bounds plz
+                        quote!( <#ty as ::hyperdrive::FromBody>::Result:
+                            ::hyperdrive::futures::IntoFuture<
+                                Item=#ty, Error=::hyperdrive::BoxedError
+                            > +
+                            ::std::marker::Send +
+                            'static
+                        ),
+                        quote!(
+                            <
+                                <#ty as ::hyperdrive::FromBody>::Result as
+                                ::hyperdrive::futures::IntoFuture
+                            >::Future: ::std::marker::Send
+                        ),
+                    ]
+                }
+                FieldKind::Guard => {
+                    vec![
+                        quote!( #ty:
+                            ::hyperdrive::Guard +
+                            ::std::marker::Send +
+                            'static
+                        ),
+                        quote!( #context: AsRef<<#ty as ::hyperdrive::Guard>::Context> ),
+                        // better implied bounds plz
+                        quote!( <#ty as ::hyperdrive::Guard>::Result:
+                            ::hyperdrive::futures::IntoFuture<
+                                Item=#ty, Error=::hyperdrive::BoxedError
+                            > +
+                            ::std::marker::Send +
+                            'static
+                        ),
+                        quote!(
+                            <
+                                <#ty as ::hyperdrive::Guard>::Result as
+                                ::hyperdrive::futures::IntoFuture
+                            >::Future: ::std::marker::Send
+                        ),
+                    ]
+                }
+            }
+        })
+        .collect()
 }
 
 /// Generates all the code needed to build an enum variant from a matching
@@ -441,14 +529,20 @@ fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStre
         let var = Ident::new(&format!("fld_{}", body), Span::call_site());
         future = quote! {
             <#ty as FromBody>::from_body(&headers, body, context.as_ref())
+                .into_future()
                 .and_then(move |#var| #future)
         };
     };
 
     // Check all guards
     // Reverse order so guards are evaluated top to bottom in declaration order.
-    for guard in data.guard_fields().iter().rev() {
-        let ty = &field_by_name(guard).ty;
+    for guard in data
+        .guard_fields()
+        .iter()
+        .map(|fld| fld.ident.clone().unwrap())
+        .rev()
+    {
+        let ty = &field_by_name(&guard).ty;
         let var = Ident::new(&format!("fld_{}", guard), Span::call_site());
         future = quote! {
             <#ty as Guard>::from_request(&headers, context.as_ref())
@@ -500,21 +594,6 @@ mod tests {
     fn on_union() {
         expand! {
             union MyStruct {}
-        }
-    }
-
-    #[test]
-    #[should_panic(expected = "#[derive(FromRequest)] does not support generic types")]
-    fn generics() {
-        expand! {
-            enum Routes<T> {
-                #[get("/{ph}")]
-                Variant {
-                    ph: u32,
-                    #[body]
-                    body: T,
-                }
-            }
         }
     }
 

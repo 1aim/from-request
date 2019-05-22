@@ -360,3 +360,128 @@ fn query_params() {
         }
     );
 }
+
+/// Tests that the derive works on generic enums and structs.
+#[test]
+fn generic() {
+    #[derive(FromRequest, Debug, PartialEq, Eq)]
+    enum Routes<U, Q, B, G> {
+        #[get("/{path}")]
+        OmniRoute {
+            path: U,
+
+            #[query_params]
+            qp: Q,
+
+            #[body]
+            body: B,
+
+            guard: G,
+        },
+    }
+
+    #[derive(RequestContext, Debug)]
+    struct SpecialContext;
+
+    #[derive(FromRequest, Debug, PartialEq, Eq)]
+    #[get("/{path}")]
+    #[context(SpecialContext)]
+    struct Struct<U, Q, B, G> {
+        path: U,
+
+        #[query_params]
+        qp: Q,
+
+        #[body]
+        body: B,
+
+        guard: G,
+    }
+
+    #[derive(PartialEq, Eq, Debug)]
+    struct NoGuard;
+
+    impl Guard for NoGuard {
+        type Context = NoContext;
+        type Result = Result<Self, BoxedError>;
+
+        fn from_request(_request: &Request<()>, _context: &Self::Context) -> Self::Result {
+            Ok(NoGuard)
+        }
+    }
+
+    #[derive(PartialEq, Eq, Debug)]
+    struct SpecialGuard;
+
+    impl Guard for SpecialGuard {
+        type Context = SpecialContext;
+        type Result = Result<Self, BoxedError>;
+
+        fn from_request(_request: &Request<()>, _context: &Self::Context) -> Self::Result {
+            Ok(SpecialGuard)
+        }
+    }
+
+    #[derive(Deserialize, PartialEq, Eq, Debug)]
+    struct Pagination {
+        start: u32,
+        count: u32,
+    }
+
+    #[derive(Deserialize, PartialEq, Eq, Debug)]
+    struct LoginData {
+        email: String,
+        password: String,
+    }
+
+    let url = "/users?start=123&count=30";
+    let body = r#"
+        {
+            "email": "test@example.com",
+            "password": "hunter2"
+        }
+        "#;
+    let route: Routes<String, Pagination, Json<LoginData>, NoGuard> =
+        invoke(Request::get(url).body(body.into()).unwrap()).unwrap();
+
+    assert_eq!(
+        route,
+        Routes::OmniRoute {
+            path: "users".to_string(),
+            qp: Pagination {
+                start: 123,
+                count: 30
+            },
+            body: Json(LoginData {
+                email: "test@example.com".to_string(),
+                password: "hunter2".to_string()
+            }),
+            guard: NoGuard,
+        }
+    );
+
+    // Make sure the `SpecialContext` is turned into whatever context is needed by the fields, and
+    // that we have the right where-clauses for it
+    let route: Struct<String, Pagination, Json<LoginData>, NoGuard> =
+        invoke_with(Request::get(url).body(body.into()).unwrap(), SpecialContext).unwrap();
+
+    assert_eq!(
+        route,
+        Struct {
+            path: "users".to_string(),
+            qp: Pagination {
+                start: 123,
+                count: 30
+            },
+            body: Json(LoginData {
+                email: "test@example.com".to_string(),
+                password: "hunter2".to_string()
+            }),
+            guard: NoGuard,
+        }
+    );
+
+    // A guard that needs a `SpecialContext` must also work:
+    let _route: Struct<String, Pagination, Json<LoginData>, SpecialGuard> =
+        invoke_with(Request::get(url).body(body.into()).unwrap(), SpecialContext).unwrap();
+}

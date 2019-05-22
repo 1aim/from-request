@@ -3,7 +3,7 @@ use indexmap::{map::Entry, IndexMap};
 use proc_macro2::{Ident, Span};
 use regex::Regex;
 use std::{fmt, slice};
-use syn::{Attribute, Lit, Meta, NestedMeta};
+use syn::{Attribute, Field, Lit, Meta, NestedMeta};
 use synstructure::VariantAst;
 
 // Attributes need to be kept in sync with lib.rs
@@ -56,6 +56,7 @@ impl ItemData {
         Self { context }
     }
 
+    /// Returns the custom context type (`None` if none was specified).
     pub fn context(&self) -> Option<&syn::Type> {
         self.context.as_ref()
     }
@@ -68,15 +69,19 @@ pub struct VariantData {
     name: Ident,
     /// The parsed HTTP routes. There's one for each `#[method]`-style attribute
     /// on the variant.
+    ///
+    /// If there are no routes, this variant will not be created by the
+    /// generated `FromRequest` implementation.
     routes: Vec<Route>,
-    body_field: Option<Ident>,
-    query_params_field: Option<Ident>,
-    guard_fields: Vec<Ident>,
+    body_field: Option<Field>,
+    query_params_field: Option<Field>,
+    guard_fields: Vec<Field>,
+    path_segment_fields: Vec<Field>,
 }
 
 /// Describes where a field is decoded from.
 #[derive(PartialEq)]
-enum FieldKind {
+pub enum FieldKind {
     PathSegment,
     QueryParams,
     Body,
@@ -154,10 +159,14 @@ impl VariantData {
         let mut body_field = None;
         let mut query_params_field = None;
         let mut guard_fields = Vec::new();
+        let mut path_segment_fields = Vec::new();
         for field in ast.fields.iter() {
             // Every field must have a role
             let mut field_kind = match &field.ident {
-                Some(ident) if placeholders.contains(ident) => Some(FieldKind::PathSegment),
+                Some(ident) if placeholders.contains(ident) => {
+                    path_segment_fields.push(ident.clone());
+                    Some(FieldKind::PathSegment)
+                }
                 _ => None,
             };
 
@@ -218,12 +227,22 @@ impl VariantData {
             }
         }
 
+        // Given a field name, returns the whole `Field`
+        let fld = |ident: Ident| -> Field {
+            ast.fields
+                .iter()
+                .find(|fld| fld.ident.clone().unwrap() == ident)
+                .unwrap()
+                .clone()
+        };
+
         Self {
             name: ast.ident.clone(),
             routes,
-            body_field,
-            query_params_field,
-            guard_fields,
+            body_field: body_field.map(fld),
+            query_params_field: query_params_field.map(fld),
+            guard_fields: guard_fields.into_iter().map(fld).collect(),
+            path_segment_fields: path_segment_fields.into_iter().map(fld).collect(),
         }
     }
 
@@ -243,19 +262,41 @@ impl VariantData {
     ///
     /// If this is `None`, the body is ignored.
     pub fn body_field(&self) -> Option<&Ident> {
-        self.body_field.as_ref()
+        self.body_field
+            .as_ref()
+            .map(|fld| fld.ident.as_ref().unwrap())
     }
 
     /// Returns the name of the field marked with `#[query_params]`.
     ///
     /// If this is `None`, the query parameters are ignored.
     pub fn query_params_field(&self) -> Option<&Ident> {
-        self.query_params_field.as_ref()
+        self.query_params_field
+            .as_ref()
+            .map(|fld| fld.ident.as_ref().unwrap())
     }
 
     /// Returns the list of fields that store guard objects.
-    pub fn guard_fields(&self) -> &[Ident] {
+    pub fn guard_fields(&self) -> &[Field] {
         &self.guard_fields
+    }
+
+    /// Returns an iterator over all fields in this variant/struct and their usage.
+    pub fn field_uses(&self) -> impl Iterator<Item = (&Field, FieldKind)> {
+        self.guard_fields
+            .iter()
+            .map(|fld| (fld, FieldKind::Guard))
+            .chain(
+                self.path_segment_fields
+                    .iter()
+                    .map(|fld| (fld, FieldKind::PathSegment)),
+            )
+            .chain(self.body_field.as_ref().map(|fld| (fld, FieldKind::Body)))
+            .chain(
+                self.query_params_field
+                    .as_ref()
+                    .map(|fld| (fld, FieldKind::QueryParams)),
+            )
     }
 }
 
