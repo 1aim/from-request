@@ -22,7 +22,7 @@ use serde::de::DeserializeOwned;
 /// # Examples
 ///
 /// TODO: Example that includes an HTML form definition
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct HtmlForm<T: DeserializeOwned + Send + 'static>(pub T);
 
 // Note that `serde_qs` offers more functionality than `serde_urlencoded`, but
@@ -53,7 +53,7 @@ impl<T: DeserializeOwned + Send + 'static> FromBody for HtmlForm<T> {
 ///
 /// The `FromBody` implementation of this type will retrieve the request body
 /// and decode it as JSON using `serde_json`. `Content-Type` is ignored.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Json<T: DeserializeOwned + Send + 'static>(pub T);
 
 impl<T: DeserializeOwned + Send + 'static> FromBody for Json<T> {
