@@ -143,7 +143,7 @@ pub use error::*;
 pub use hyperderive::*;
 
 // Reexport public deps for use by the custom derive
-pub use {futures, http, hyper};
+pub use {futures, http, hyper, serde};
 
 // These are hidden because the user never actually interacts with them. They're
 // only used by the generated code internally.
