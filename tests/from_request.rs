@@ -216,7 +216,7 @@ fn struct_context() {
 
 #[test]
 fn any_placeholder() {
-    #[derive(FromRequest, Debug)]
+    #[derive(FromRequest, Debug, PartialEq, Eq)]
     enum Routes {
         #[get("/{ph}/{rest...}")]
         Variant { ph: u32, rest: String },
@@ -228,12 +228,22 @@ fn any_placeholder() {
             .unwrap(),
     )
     .unwrap();
-    match route {
-        Routes::Variant { ph, rest } => {
-            assert_eq!(ph, 1234);
-            assert_eq!(rest, "bla/bli");
-        }
-    }
+    assert_eq!(route, Routes::Variant { ph: 1234, rest: "bla/bli".to_string() });
+
+    let route = invoke::<Routes>(
+        Request::get("/1234/")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(route, Routes::Variant { ph: 1234, rest: "".to_string() });
+
+    invoke::<Routes>(
+        Request::get("/1234")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .unwrap_err();
 }
 
 #[test]
