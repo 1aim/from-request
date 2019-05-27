@@ -16,7 +16,7 @@ const METHOD_ATTRS: &[&str] = &[
 fn our_attrs() -> impl Iterator<Item = &'static str> {
     METHOD_ATTRS
         .iter()
-        .chain(&["context", "body", "query_params"])
+        .chain(&["context", "body", "forward", "query_params"])
         .cloned()
 }
 
@@ -33,11 +33,12 @@ fn is_method(name: &Ident) -> bool {
 
 /// Parsed attributes attached to the item that does `#[derive(FromRequest)]`.
 pub struct ItemData {
+    name: Ident,
     context: Option<syn::Type>,
 }
 
 impl ItemData {
-    pub fn parse(attrs: &[Attribute], is_struct: bool) -> Self {
+    pub fn parse(name: Ident, attrs: &[Attribute], is_struct: bool) -> Self {
         let mut context = None;
 
         for attr in attrs {
@@ -53,7 +54,7 @@ impl ItemData {
             }
         }
 
-        Self { context }
+        Self { name, context }
     }
 
     /// Returns the custom context type (`None` if none was specified).
@@ -70,10 +71,15 @@ pub struct VariantData {
     /// The parsed HTTP routes. There's one for each `#[method]`-style attribute
     /// on the variant.
     ///
-    /// If there are no routes, this variant will not be created by the
-    /// generated `FromRequest` implementation.
+    /// If there are no routes, but a `forward_field`, then the variant acts as a fallback and is
+    /// chosen when no other variant matches. There must only be a single fallback variant for the
+    /// type.
+    ///
+    /// If this is empty and there's no `forward_field`, then this variant will not be created by
+    /// the derived `FromRequest` implementation.
     routes: Vec<Route>,
     body_field: Option<Field>,
+    forward_field: Option<Field>,
     query_params_field: Option<Field>,
     guard_fields: Vec<Field>,
     path_segment_fields: Vec<Field>,
@@ -82,9 +88,15 @@ pub struct VariantData {
 /// Describes where a field is decoded from.
 #[derive(PartialEq)]
 pub enum FieldKind {
+    /// Field is decoded from `{placeholders}` in the URL.
     PathSegment,
+    /// Field is `Deserialize`d from query parameters.
     QueryParams,
+    /// Field is decoded from request body using `FromBody`.
     Body,
+    /// Field is decoded from entire request using `FromRequest`.
+    Forward,
+    /// Field is decoded from request metadata using `Guard`.
     Guard,
 }
 
@@ -157,6 +169,7 @@ impl VariantData {
 
         // Now check all attributes on the variant's fields
         let mut body_field = None;
+        let mut forward_field = None;
         let mut query_params_field = None;
         let mut guard_fields = Vec::new();
         let mut path_segment_fields = Vec::new();
@@ -180,7 +193,11 @@ impl VariantData {
                             panic!("#[body] is not supported on unnamed fields");
                         }
 
-                        insert("#[body]/#[query_params]", &mut field_kind, FieldKind::Body);
+                        insert(
+                            "#[body]/#[query_params]/#[forward]",
+                            &mut field_kind,
+                            FieldKind::Body,
+                        );
                     }
                     Meta::Word(ident) if ident == "query_params" => {
                         if let Some(ident) = &field.ident {
@@ -190,9 +207,22 @@ impl VariantData {
                         }
 
                         insert(
-                            "#[body]/#[query_params]",
+                            "#[body]/#[query_params]/#[forward]",
                             &mut field_kind,
                             FieldKind::QueryParams,
+                        );
+                    }
+                    Meta::Word(ident) if ident == "forward" => {
+                        if let Some(ident) = &field.ident {
+                            insert("#[forward]", &mut forward_field, ident.clone());
+                        } else {
+                            panic!("#[forward] is not supported on unnamed fields");
+                        }
+
+                        insert(
+                            "#[body]/#[query_params]/#[forward]",
+                            &mut field_kind,
+                            FieldKind::Forward,
                         );
                     }
                     _ if known_attr(&meta.name()) => {
@@ -214,6 +244,10 @@ impl VariantData {
                         .expect("#[derive(FromRequest)] requires named fields"),
                 );
             }
+        }
+
+        if body_field.is_some() && forward_field.is_some() {
+            panic!("#[body] and #[forward] cannot be combined in the same variant/struct");
         }
 
         // If there's no route, deny all attributes on fields as well
@@ -240,10 +274,16 @@ impl VariantData {
             name: ast.ident.clone(),
             routes,
             body_field: body_field.map(fld),
+            forward_field: forward_field.map(fld),
             query_params_field: query_params_field.map(fld),
             guard_fields: guard_fields.into_iter().map(fld).collect(),
             path_segment_fields: path_segment_fields.into_iter().map(fld).collect(),
         }
+    }
+
+    /// Returns whether this variant may be constructed by the generated `FromRequest` impl code.
+    pub fn constructible(&self) -> bool {
+        !self.routes.is_empty() || self.forward_field().is_some()
     }
 
     pub fn variant_name(&self) -> &Ident {
@@ -263,6 +303,15 @@ impl VariantData {
     /// If this is `None`, the body is ignored.
     pub fn body_field(&self) -> Option<&Ident> {
         self.body_field
+            .as_ref()
+            .map(|fld| fld.ident.as_ref().unwrap())
+    }
+
+    /// Returns the name of the field marked with `#[forward]`.
+    ///
+    /// If this is `None`, no `FromRequest`-forwarding takes place.
+    pub fn forward_field(&self) -> Option<&Ident> {
+        self.forward_field
             .as_ref()
             .map(|fld| fld.ident.as_ref().unwrap())
     }
@@ -296,6 +345,11 @@ impl VariantData {
                 self.query_params_field
                     .as_ref()
                     .map(|fld| (fld, FieldKind::QueryParams)),
+            )
+            .chain(
+                self.forward_field
+                    .as_ref()
+                    .map(|fld| (fld, FieldKind::Forward)),
             )
     }
 }
@@ -585,15 +639,31 @@ impl PathSegment {
 /// Maps generated path regexes to method->variant maps.
 pub struct PathMap {
     regex_map: IndexMap<ByProxy<Regex, str>, IndexMap<Ident, (VariantData, Route)>>,
+    fallback: Option<VariantData>,
 }
 
 impl PathMap {
-    pub fn build(variants: &[VariantData]) -> Self {
+    pub fn build(item: &ItemData, variants: &[VariantData]) -> Self {
         let mut this = Self {
             regex_map: IndexMap::new(),
+            fallback: None,
         };
 
         for variant in variants {
+            if variant.routes.is_empty() && variant.forward_field.is_some() {
+                if let Some(prev) = this.fallback {
+                    panic!(
+                        "cannot define multiple fallback variants – `{ty}::{v1}` and `{ty}::{v2}` \
+                         both use `#[forward]` without a route attribute",
+                        ty = item.name,
+                        v1 = prev.name,
+                        v2 = variant.name,
+                    );
+                } else {
+                    this.fallback = Some(variant.clone());
+                }
+            }
+
             for route in &variant.routes {
                 // Check for overlap with all previously registered routes
                 for prev_route in this
@@ -677,6 +747,11 @@ impl PathMap {
             regex: regex.as_ref(),
             method_map,
         })
+    }
+
+    /// Returns the fallback variant, a variant using `#[forward]`, without a route attribute.
+    pub fn fallback(&self) -> Option<&VariantData> {
+        self.fallback.as_ref()
     }
 }
 

@@ -84,7 +84,7 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
         syn::Data::Enum(_) => is_struct = false,
     }
 
-    let item_data = ItemData::parse(&s.ast().attrs, is_struct);
+    let item_data = ItemData::parse(s.ast().ident.clone(), &s.ast().attrs, is_struct);
 
     let context = item_data.context().cloned().unwrap_or_else(|| {
         syn::parse_str("NoContext").expect("internal error: couldn't parse type")
@@ -95,7 +95,7 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
         .iter()
         .map(|variant| {
             let data = VariantData::parse(&variant.ast(), is_struct);
-            if !data.routes().is_empty() {
+            if data.constructible() {
                 // can be created by us
                 match &variant.ast().fields {
                     syn::Fields::Unnamed(_) => panic!(
@@ -109,7 +109,7 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
             data
         })
         .collect::<Vec<_>>();
-    let pathmap = PathMap::build(&variant_data);
+    let pathmap = PathMap::build(&item_data, &variant_data);
     let all_regexes = pathmap
         .paths()
         .map(|p| p.regex().as_str().to_string())
@@ -120,6 +120,8 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
     if pathmap.paths().next().is_none() {
         // Not a single route attribute in the entire item. This situation would lead to "cannot
         // infer type for `T`" errors.
+        // FIXME: This should not be happening, we *want* to be able to create structs without a
+        // route attr.
         let what = if is_struct {
             "struct"
         } else {
@@ -186,14 +188,21 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
                 };
                 Some((data.variant_name().clone(), matches_path))
             } else {
-                // We only care about variants with at least one `#[method]`-style attr
-                None
+                // No `#[method]` on the variant.
+                if data.forward_field().is_some() {
+                    // Fallback variant, always matches
+                    Some((data.variant_name().clone(), quote!(true)))
+                } else {
+                    // Don't include this variant at all, since we'll never construct it
+                    assert!(!data.constructible());
+                    None
+                }
             }
         })
         .unzip();
     let variants = &variants;
 
-    let regex_match_arms = pathmap
+    let mut regex_match_arms = pathmap
         .paths()
         .enumerate()
         .flat_map(|(i, pathinfo)| {
@@ -202,30 +211,37 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
                 .map(move |(method, variant)| {
                     let variant = &variant.variant_name();
                     quote! {
-                        (#i, &http::Method::#method) => Variant::#variant,
+                        (Some(#i), &http::Method::#method) => Variant::#variant,
                     }
                 })
                 .chain(iter::once({
                     // This arm matches when the path matches, but an incorrect method is used.
-                    if pathinfo.regex().captures_len() == 0 {
-                        // No captures, no FromStr: We have a fixed list of allowed methods
-                        let methods = pathinfo.method_map().map(|(m, _)| m).collect::<Vec<_>>();
+                    // Here, we can still #[forward] to another `FromRequest` impl, so this doesn't
+                    // always.
 
-                        quote! {
-                            (#i, _) => return Error::wrong_method(&[
-                                #( Method::#methods, )*
-                            ]).into_future(),
-                        }
-                    } else {
-                        // We have placeholders; check the request path against all variants that
-                        // share the same path pattern
-                        let (variants, methods): (Vec<_>, Vec<_>) = pathinfo
-                            .method_map()
-                            .map(|(method, variant)| (variant.variant_name(), method))
-                            .unzip();
+                    // This evaluates to a `&'static [Method]` or `Vec<Method>` containing all
+                    // methods accepted by the invoked route, ignoring any #[forward]-marked
+                    // `FromRequest` impl.
+                    let find_accepted_methods = {
+                        if pathinfo.regex().captures_len() == 0 {
+                            // No captures, no FromStr: We have a statically known list of allowed
+                            // methods.
+                            let methods = pathinfo.method_map().map(|(m, _)| m).collect::<Vec<_>>();
 
-                        quote! {
-                            (#i, _) => {
+                            quote! {
+                                &[
+                                    #( Method::#methods, )*
+                                ]
+                            }
+                        } else {
+                            // We have placeholders; check the request path against all variants that
+                            // share the same path pattern
+                            let (variants, methods): (Vec<_>, Vec<_>) = pathinfo
+                                .method_map()
+                                .map(|(method, variant)| (variant.variant_name(), method))
+                                .unzip();
+
+                            quote! {{
                                 let path = request.uri().path();
                                 let regex = REGEXES[#i].as_ref().unwrap();
                                 let mut methods = Vec::new();
@@ -235,7 +251,66 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
                                         methods.push(&http::Method::#methods);
                                     }
                                 )*
+                                methods
+                            }}
+                        }
+                    };
 
+                    if let Some(fallback) = pathmap.fallback() {
+                        // If there's a fallback variant, it might save us and accept the request.
+                        // If not, we match the request path against all variants and collect the
+                        // accepted methods.
+                        // Note that if the fallback variant fails to match with a "wrong
+                        // method" error, we need to merge the sets of accepted methods.
+
+                        let info = s
+                            .variants()
+                            .iter()
+                            .find(|v| v.ast().ident == fallback.variant_name())
+                            .expect("couldn't find fallback variant");
+                        let construct = construct_variant(info, fallback);
+
+                        quote! {
+                            (Some(#i), _) => {
+                                // FIXME `find_accepted_methods` needs access to `request.uri()`
+                                // in the `map_err`. Clean things up so we don't need this.
+                                let mut tmp_request = Request::new(());
+                                *tmp_request.uri_mut() = request.uri().clone();
+
+                                let future = #construct;
+                                let future = future.map_err(move |mut e| {
+                                    use hyperdrive::{Error, ErrorKind};
+
+                                    // If the #[forward]ed impl also failed with "wrong_method", add
+                                    // our accepted methods to it.
+                                    if let Some(err) = e.downcast_mut::<Error>() {
+                                        if err.kind() == ErrorKind::WrongMethod {
+                                            let request = tmp_request;
+                                            let mut our_methods = Vec::from(#find_accepted_methods);
+                                            let inner_methods = err.allowed_methods()
+                                                .expect("`WrongMethod` but no `allowed_methods()`?");
+
+                                            our_methods.extend(inner_methods);
+
+                                            Box::new(Error::wrong_method(Vec::from(our_methods)))
+                                        } else {
+                                            e
+                                        }
+                                    } else {
+                                        e
+                                    }
+                                });
+
+                                return Box::new(future);
+                            }
+                        }
+                    } else {
+                        // No fallback variant. Match the request path against all variants
+                        // sharing the same path pattern, checking if the FromStr succeeds,
+                        // and collecting all accepted methods.
+                        quote! {
+                            (Some(#i), _) => {
+                                let methods = #find_accepted_methods;
                                 return Error::wrong_method(methods).into_future();
                             }
                         }
@@ -244,15 +319,33 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
         })
         .collect::<Vec<_>>();
 
+    if let Some(fallback) = pathmap.fallback() {
+        // If we have a fallback route, return it when no other regex matches.
+        // Note that this is not sufficient to correctly handle #[forward].
+        let variant = fallback.variant_name();
+        regex_match_arms.push(quote! {
+            _ => {
+                Variant::#variant
+            }
+        });
+    } else {
+        // No fallback route, add an error arm
+        regex_match_arms.push(quote! {
+            _ => {
+                return Error::from_kind(ErrorKind::NoMatchingRoute).into_future();
+            }
+        });
+    }
+
     let variant_arms = s
         .variants()
         .iter()
         .zip(&variant_data)
         .filter_map(|(variant, data)| {
-            if data.routes().is_empty() {
-                None
-            } else {
+            if data.constructible() {
                 Some(construct_variant(variant, data))
+            } else {
+                None
             }
         })
         .collect::<Vec<_>>();
@@ -328,14 +421,10 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
                     "internal error: FromRequest derive produced overlapping regexes (path={},method={},regexes={:?})",
                     path, method, &[ #(#all_regexes),* ]
                 );
-                let index = match matches.iter().next() {
-                    Some(index) => index,
-                    None => return Error::from_kind(ErrorKind::NoMatchingRoute).into_future(),
-                };
+                let index = matches.iter().next();
 
                 let variant = match (index, method) {
                     #(#regex_match_arms)*
-                    _ => unreachable!("FromRequest derive generated bad match"),
                 };
 
                 match variant {
@@ -419,6 +508,14 @@ fn generate_trait_bounds(item: &ItemData, variants: &[VariantData]) -> Vec<Token
                         ),
                     ]
                 }
+                FieldKind::Forward => vec![
+                    // FIXME: support `AsRef` conversion here too
+                    quote!( #ty:
+                        ::hyperdrive::FromRequest<Context=#context> +
+                        ::std::marker::Send +
+                        'static
+                    ),
+                ],
             }
         })
         .collect()
@@ -427,7 +524,7 @@ fn generate_trait_bounds(item: &ItemData, variants: &[VariantData]) -> Vec<Token
 /// Generates all the code needed to build an enum variant from a matching
 /// request.
 ///
-/// Returns an expression.
+/// Returns an expression of type `DefaultFuture<Self, BoxedError>`.
 ///
 /// The generated code will do the following:
 /// * If the path has any segment placeholders:
@@ -439,13 +536,10 @@ fn generate_trait_bounds(item: &ItemData, variants: &[VariantData]) -> Vec<Token
 ///   * Chain all calls to the `from_request` methods
 /// * If it has a `body`
 ///   * Chain the call to its `from_body` method
+///
+/// The code will also assume:
+/// * That `request` is the incoming request, and can be consumed.
 fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStream {
-    // Must have at least 1 route, otherwise we wouldn't be here
-    let route = data
-        .routes()
-        .first()
-        .expect("internal error: no routes on variant");
-
     let field_by_name = |name: &Ident| -> &syn::Field {
         variant
             .ast()
@@ -455,40 +549,49 @@ fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStre
             .expect("internal error: couldn't find field by name")
     };
 
-    let placeholders = if route.placeholders().is_empty() {
-        quote!() // nothing to do
-    } else {
-        // For each placeholder, get its captured string and parse it
-        let parse = route
-            .placeholders()
-            .iter()
-            .enumerate()
-            .map(|(i, field_name)| {
-                let variable = Ident::new(&format!("fld_{}", field_name), Span::call_site());
-                let capture = i + 1;
-                let ty = &field_by_name(field_name).ty;
+    let placeholders = {
+        // If we have route attributes on this variant, they all have the same (order of)
+        // placeholders, so we only need to look at the first attribute.
+        match data.routes().first() {
+            Some(route) if !route.placeholders().is_empty() => {
+                // For each placeholder, get its captured string and parse it
+                let parse = route
+                    .placeholders()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, field_name)| {
+                        let variable = Ident::new(&format!("fld_{}", field_name), Span::call_site());
+                        let capture = i + 1;
+                        let ty = &field_by_name(field_name).ty;
+                        quote! {
+                            let #variable = captures
+                                .get(#capture)
+                                .expect("internal error: capture group did not match anything")
+                                .as_str();
+                            let #variable = match <#ty as FromStr>::from_str(#variable) {
+                                Ok(v) => v,
+                                Err(e) => return Error::with_source(ErrorKind::PathSegment, e).into_future(),
+                            };
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
                 quote! {
-                    let #variable = captures
-                        .get(#capture)
-                        .expect("internal error: capture group did not match anything")
-                        .as_str();
-                    let #variable = match <#ty as FromStr>::from_str(#variable) {
-                        Ok(v) => v,
-                        Err(e) => return Error::with_source(ErrorKind::PathSegment, e).into_future(),
-                    };
+                    // Re-match the path with the right regex and get the captures
+                    let captures = REGEXES[index.expect("no regex matched, but there's placeholders?")]
+                        .as_ref()
+                        .expect("internal error: no regex for route with placeholders")
+                        .captures(request.uri().path())
+                        .expect("internal error: regex first matched but now didn't?");
+
+                    #(#parse)*
                 }
-            })
-            .collect::<Vec<_>>();
-
-        quote! {
-            // Re-match the path with the right regex and get the captures
-            let captures = REGEXES[index]
-                .as_ref()
-                .expect("internal error: no regex for route with placeholders")
-                .captures(request.uri().path())
-                .expect("internal error: regex first matched but now didn't?");
-
-            #(#parse)*
+            }
+            _ => {
+                // No route (fallback route using #[forward]), or no placeholders.
+                // Nothing to do.
+                quote!()
+            }
         }
     };
 
@@ -533,6 +636,24 @@ fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStre
                 .and_then(move |#var| #future)
         };
     };
+
+    // Forward to another `FromRequest` implementor (can not be combined with #[body])
+    if let Some(forward) = data.forward_field() {
+        let ty = &field_by_name(forward).ty;
+        let var = Ident::new(&format!("fld_{}", forward), Span::call_site());
+        future = quote! {{
+            // When we get here, the incoming request was split into `body` (type `Body`) and
+            // `headers` (type `Request<()>`), so we need to recombine them. It's okay to consume
+            // both, since this is the last processing step in the chain.
+            let request = http::Request::from_parts(headers.into_parts().0, body);
+
+            // FIXME: we move the context as-is because `FromRequest` consumes it. we should be
+            // using AsRef
+            <#ty as FromRequest>::from_request(request, context)
+                .into_future()
+                .and_then(move |#var| #future)
+        }};
+    }
 
     // Check all guards
     // Reverse order so guards are evaluated top to bottom in declaration order.
@@ -586,6 +707,26 @@ mod tests {
                 expands to {} no_build
             }
         };
+    }
+
+    #[test]
+    #[ignore]
+    fn bla() {
+        expand! {
+            #[derive(FromRequest)]
+            enum Enum {
+                #[get("/")]
+                First {
+                    #[forward]
+                    _inner: Inner,
+                },
+
+                Second {
+                    #[forward]
+                    _inner: Inner,
+                },
+            }
+        }
     }
 
     #[test]
@@ -744,6 +885,42 @@ mod tests {
                 NoRoute {
                     #[body]
                     body: (),
+                },
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "#[body] and #[forward] cannot be combined")]
+    fn body_and_forward() {
+        expand! {
+            enum Routes {
+                #[get("/")]
+                Index {
+                    #[body]
+                    body: (),
+
+                    #[forward]
+                    forward: (),
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot define multiple fallback variants")]
+    fn multiple_fallback_routes() {
+        expand! {
+            #[derive(FromRequest)]
+            enum Enum {
+                First {
+                    #[forward]
+                    inner: (),
+                },
+
+                Second {
+                    #[forward]
+                    inner: (),
                 },
             }
         }

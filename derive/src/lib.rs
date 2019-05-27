@@ -1,7 +1,7 @@
 //! The custom derive powering the [`hyperdrive`] crate.
 //!
 //! You should never use this crate directly. It does not expose a stable API
-//! and may break at any time. Use `hyperdrive` directly instead.
+//! and may break at any time. Use [`hyperdrive`] directly instead.
 //!
 //! [`hyperdrive`]: https://docs.rs/hyperdrive
 
@@ -20,7 +20,7 @@ use request_context::derive_request_context;
 decl_derive!([FromRequest, attributes(
     // Attributes need to be kept in sync with from_request/parse.rs
 
-    context, body, query_params,
+    context, body, forward, query_params,
 
     // We support all HTTP verbs from RFC 7231 as well as PATCH
     get, head, post, put, delete, connect, options, trace, patch

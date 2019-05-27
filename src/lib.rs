@@ -364,6 +364,19 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// are neither mentioned in the route path nor annotated with an attribute are
 /// considered guards and thus must implement the [`Guard`] trait.
 ///
+/// ## Forwarding
+///
+/// A field whose type implements `FromRequest` can be marked with `#[forward]`.
+/// The library will then generate code that invokes this nested `FromRequest`
+/// implementation.
+///
+/// This feature can not be combined with `#[body]` inside the same variant,
+/// since both consume the request body.
+///
+/// Currently, this is limited to `FromRequest` implementations that use the
+/// same `Context` as the outer type (ie. no automatic `AsRef` conversion will
+/// take place).
+///
 /// ## Changing the `Context` type
 ///
 /// By default, the generated code will use [`NoContext`] as the associated

@@ -5,6 +5,7 @@ use hyperdrive::{
     BoxedError, Error, ErrorKind, FromRequest, Guard, NoContext, RequestContext,
 };
 use serde::Deserialize;
+use std::str::FromStr;
 
 /// Simulates receiving `request`, and decodes a `FromRequest` implementor `T`.
 ///
@@ -23,7 +24,7 @@ where
     T::from_request_sync(request, context)
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct MyGuard;
 
 impl Guard for MyGuard {
@@ -414,18 +415,6 @@ fn generic() {
     }
 
     #[derive(PartialEq, Eq, Debug)]
-    struct NoGuard;
-
-    impl Guard for NoGuard {
-        type Context = NoContext;
-        type Result = Result<Self, BoxedError>;
-
-        fn from_request(_request: &Request<()>, _context: &Self::Context) -> Self::Result {
-            Ok(NoGuard)
-        }
-    }
-
-    #[derive(PartialEq, Eq, Debug)]
     struct SpecialGuard;
 
     impl Guard for SpecialGuard {
@@ -456,7 +445,7 @@ fn generic() {
             "password": "hunter2"
         }
         "#;
-    let route: Routes<String, Pagination, Json<LoginData>, NoGuard> =
+    let route: Routes<String, Pagination, Json<LoginData>, MyGuard> =
         invoke(Request::get(url).body(body.into()).unwrap()).unwrap();
 
     assert_eq!(
@@ -471,13 +460,13 @@ fn generic() {
                 email: "test@example.com".to_string(),
                 password: "hunter2".to_string()
             }),
-            guard: NoGuard,
+            guard: MyGuard,
         }
     );
 
     // Make sure the `SpecialContext` is turned into whatever context is needed by the fields, and
     // that we have the right where-clauses for it
-    let route: Struct<String, Pagination, Json<LoginData>, NoGuard> =
+    let route: Struct<String, Pagination, Json<LoginData>, MyGuard> =
         invoke_with(Request::get(url).body(body.into()).unwrap(), SpecialContext).unwrap();
 
     assert_eq!(
@@ -492,11 +481,227 @@ fn generic() {
                 email: "test@example.com".to_string(),
                 password: "hunter2".to_string()
             }),
-            guard: NoGuard,
+            guard: MyGuard,
         }
     );
 
     // A guard that needs a `SpecialContext` must also work:
     let _route: Struct<String, Pagination, Json<LoginData>, SpecialGuard> =
         invoke_with(Request::get(url).body(body.into()).unwrap(), SpecialContext).unwrap();
+}
+
+#[test]
+fn forward() {
+    #[derive(FromRequest, PartialEq, Eq, Debug)]
+    enum Inner {
+        #[get("/")]
+        Index,
+
+        #[get("/flabberghast")]
+        Flabberghast,
+
+        #[post("/")]
+        Post,
+    }
+
+    #[derive(FromRequest, PartialEq, Eq, Debug)]
+    #[get("/")] // FIXME: forbid this?
+    struct Req {
+        #[forward]
+        _inner: Inner,
+    }
+
+    #[derive(FromRequest, PartialEq, Eq, Debug)]
+    enum Enum {
+        #[get("/")]
+        First {
+            #[forward]
+            _inner: Inner,
+        },
+
+        Second {
+            #[forward]
+            _inner: Inner,
+        },
+    }
+
+    invoke::<Req>(Request::get("/").body(Body::empty()).unwrap()).unwrap();
+
+    let route = invoke::<Enum>(Request::get("/").body(Body::empty()).unwrap()).unwrap();
+    assert_eq!(
+        route,
+        Enum::First {
+            _inner: Inner::Index
+        },
+        "GET /"
+    );
+
+    let route = invoke::<Enum>(Request::head("/").body(Body::empty()).unwrap()).unwrap();
+    assert_eq!(
+        route,
+        Enum::First {
+            _inner: Inner::Index
+        },
+        "HEAD /"
+    );
+
+    let route = invoke::<Enum>(Request::get("/flabberghast").body(Body::empty()).unwrap()).unwrap();
+    assert_eq!(
+        route,
+        Enum::Second {
+            _inner: Inner::Flabberghast
+        },
+        "GET /flabberghast"
+    );
+
+    let route = invoke::<Enum>(Request::post("/").body(Body::empty()).unwrap()).unwrap();
+    assert_eq!(
+        route,
+        Enum::Second {
+            _inner: Inner::Post
+        },
+        "POST /"
+    );
+}
+
+/// Tests that invalid methods return the right set of allowed methods, even in the presence of
+/// `#[forward]`.
+#[test]
+fn forward_allowed_methods() {
+    #[derive(FromRequest, PartialEq, Eq, Debug)]
+    enum Inner {
+        #[get("/")]
+        #[post("/")]
+        Index,
+
+        #[get("/customhead")]
+        GetCustomHead,
+
+        #[head("/customhead")]
+        HeadCustomHead,
+
+        #[post("/post")]
+        Post,
+
+        #[post("/shared")]
+        Shared,
+
+        #[post("/shared/{s}")]
+        Shared2 { s: u32 },
+    }
+
+    #[derive(FromRequest, PartialEq, Eq, Debug)]
+    enum Wrapper {
+        #[get("/shared")]
+        Shared,
+
+        #[get("/shared/{s}")]
+        Shared2 { s: u8 },
+
+        Fallback {
+            #[forward]
+            inner: Inner,
+        },
+    }
+
+    #[derive(PartialEq, Eq, Debug)]
+    struct AlwaysErr;
+
+    impl FromStr for AlwaysErr {
+        type Err = BoxedError;
+
+        fn from_str(_: &str) -> Result<Self, BoxedError> {
+            Err(String::new().into())
+        }
+    }
+
+    let err: Box<Error> = invoke::<Wrapper>(Request::get("/post").body(Body::empty()).unwrap())
+        .unwrap_err()
+        .downcast()
+        .unwrap();
+    assert_eq!(err.kind(), ErrorKind::WrongMethod);
+    assert_eq!(
+        err.allowed_methods().expect("allowed_methods()"),
+        &[&Method::POST]
+    );
+
+    let err: Box<Error> =
+        invoke::<Wrapper>(Request::post("/customhead").body(Body::empty()).unwrap())
+            .unwrap_err()
+            .downcast()
+            .unwrap();
+    assert_eq!(err.kind(), ErrorKind::WrongMethod);
+    assert_eq!(
+        err.allowed_methods().expect("allowed_methods()"),
+        &[&Method::GET, &Method::HEAD]
+    );
+
+    // `/shared` is defined in both. Outer takes precedence over inner, if it matches.
+
+    let route = invoke::<Wrapper>(Request::post("/shared").body(Body::empty()).unwrap()).unwrap();
+    assert_eq!(
+        route,
+        Wrapper::Fallback {
+            inner: Inner::Shared
+        }
+    );
+
+    let route = invoke::<Wrapper>(Request::get("/shared").body(Body::empty()).unwrap()).unwrap();
+    assert_eq!(route, Wrapper::Shared);
+
+    // Methods not accepted by either result in `allowed_methods()` being merged together.
+    let err: Box<Error> = invoke::<Wrapper>(Request::put("/shared").body(Body::empty()).unwrap())
+        .unwrap_err()
+        .downcast()
+        .unwrap();
+    assert_eq!(err.kind(), ErrorKind::WrongMethod);
+    assert_eq!(
+        err.allowed_methods().expect("allowed_methods()"),
+        &[&Method::GET, &Method::HEAD, &Method::POST]
+    );
+
+    // Also with FromStr segments
+    let route =
+        invoke::<Wrapper>(Request::post("/shared/123").body(Body::empty()).unwrap()).unwrap();
+    assert_eq!(
+        route,
+        Wrapper::Fallback {
+            inner: Inner::Shared2 { s: 123 }
+        }
+    );
+
+    let route =
+        invoke::<Wrapper>(Request::get("/shared/123").body(Body::empty()).unwrap()).unwrap();
+    assert_eq!(route, Wrapper::Shared2 { s: 123 });
+}
+
+#[test]
+fn generic_forward() {
+    #[derive(FromRequest, Debug, PartialEq, Eq)]
+    enum Generic<G, I> {
+        #[get("/unused")]
+        Unused,
+        Fallback {
+            guard: G,
+
+            #[forward]
+            inner: I,
+        },
+    }
+
+    #[derive(FromRequest, Debug, PartialEq, Eq)]
+    enum Inner {
+        #[get("/")]
+        Index,
+    }
+
+    let route: Generic<MyGuard, Inner> =
+        invoke(Request::get("/").body(Body::empty()).unwrap()).unwrap();
+    assert_eq!(
+        route,
+        Generic::Fallback {
+            guard: MyGuard,
+            inner: Inner::Index
+        }
+    );
 }
