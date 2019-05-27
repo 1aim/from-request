@@ -26,12 +26,12 @@ impl Error {
     /// caused this one.
     pub fn with_source<S>(kind: ErrorKind, source: S) -> Self
     where
-        S: error::Error + Send + Sync + 'static,
+        S: Into<BoxedError>,
     {
         Self {
             kind,
             allowed_methods: (&[][..]).into(),
-            source: Some(Box::new(source)),
+            source: Some(source.into()),
         }
     }
 
