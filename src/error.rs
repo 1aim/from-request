@@ -90,9 +90,16 @@ impl Error {
         Box::new(Err(BoxedError::from(self)).into_future())
     }
 
-    #[doc(hidden)] // only used by tests
-    pub fn allowed_methods(&self) -> &[&'static http::Method] {
-        &self.allowed_methods
+    /// If `self` is of type `ErrorKind::WrongMethod`, returns the list of
+    /// allowed methods.
+    ///
+    /// Returns `None` if `self` is a different kind of error.
+    pub fn allowed_methods(&self) -> Option<&[&'static http::Method]> {
+        if self.kind() == ErrorKind::WrongMethod {
+            Some(&self.allowed_methods)
+        } else {
+            None
+        }
     }
 }
 

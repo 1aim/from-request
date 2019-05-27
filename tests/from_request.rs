@@ -113,13 +113,16 @@ fn user_app() {
     let get_login = invoke::<Routes>(Request::get("/login").body(Body::empty()).unwrap());
     let error: Box<Error> = get_login.unwrap_err().downcast().unwrap();
     assert_eq!(error.kind(), ErrorKind::WrongMethod);
-    assert_eq!(error.allowed_methods(), &[&Method::POST]);
+    assert_eq!(
+        error.allowed_methods().expect("allowed_methods()"),
+        &[&Method::POST]
+    );
 
     let post_user = invoke::<Routes>(Request::post("/users/0").body(Body::empty()).unwrap());
     let error: Box<Error> = post_user.unwrap_err().downcast().unwrap();
     assert_eq!(error.kind(), ErrorKind::WrongMethod);
     assert_eq!(
-        error.allowed_methods(),
+        error.allowed_methods().expect("allowed_methods()"),
         &[&Method::GET, &Method::PATCH, &Method::HEAD]
     );
 
@@ -228,22 +231,24 @@ fn any_placeholder() {
             .unwrap(),
     )
     .unwrap();
-    assert_eq!(route, Routes::Variant { ph: 1234, rest: "bla/bli".to_string() });
+    assert_eq!(
+        route,
+        Routes::Variant {
+            ph: 1234,
+            rest: "bla/bli".to_string()
+        }
+    );
 
-    let route = invoke::<Routes>(
-        Request::get("/1234/")
-            .body(Body::empty())
-            .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(route, Routes::Variant { ph: 1234, rest: "".to_string() });
+    let route = invoke::<Routes>(Request::get("/1234/").body(Body::empty()).unwrap()).unwrap();
+    assert_eq!(
+        route,
+        Routes::Variant {
+            ph: 1234,
+            rest: "".to_string()
+        }
+    );
 
-    invoke::<Routes>(
-        Request::get("/1234")
-            .body(Body::empty())
-            .unwrap(),
-    )
-    .unwrap_err();
+    invoke::<Routes>(Request::get("/1234").body(Body::empty()).unwrap()).unwrap_err();
 }
 
 #[test]
