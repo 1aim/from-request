@@ -13,7 +13,9 @@ pub struct Error {
 }
 
 impl Error {
-    /// Creates an error that contains just the given `ErrorKind`.
+    /// Creates an error that contains just the given [`ErrorKind`].
+    ///
+    /// [`ErrorKind`]: enum.ErrorKind.html
     pub fn from_kind(kind: ErrorKind) -> Self {
         Self {
             kind,
@@ -22,8 +24,17 @@ impl Error {
         }
     }
 
-    /// Creates an error from an `ErrorKind` and the underlying error that
+    /// Creates an error from an [`ErrorKind`] and an underlying error that
     /// caused this one.
+    ///
+    /// # Parameters
+    ///
+    /// * **`kind`**: The [`ErrorKind`] describing the error.
+    /// * **`source`**: The underlying error that caused this one. Needs to
+    ///   implement `Into<BoxedError>`, so any type that implements
+    ///   `std::error::Error + Send + Sync` can be passed.
+    ///
+    /// [`ErrorKind`]: enum.ErrorKind.html
     pub fn with_source<S>(kind: ErrorKind, source: S) -> Self
     where
         S: Into<BoxedError>,
@@ -35,7 +46,10 @@ impl Error {
         }
     }
 
-    /// Creates a `WrongMethod` error, given the allowed set of HTTP methods.
+    /// Creates an error with [`ErrorKind::WrongMethod`], given the allowed set
+    /// of HTTP methods.
+    ///
+    /// [`ErrorKind::WrongMethod`]: enum.ErrorKind.html#variant.WrongMethod
     pub fn wrong_method<M>(allowed_methods: M) -> Self
     where
         M: Into<Cow<'static, [&'static http::Method]>>,
@@ -47,7 +61,9 @@ impl Error {
         }
     }
 
-    /// Returns the `ErrorKind` that further describes this error.
+    /// Returns the [`ErrorKind`] that further describes this error.
+    ///
+    /// [`ErrorKind`]: enum.ErrorKind.html
     pub fn kind(&self) -> ErrorKind {
         self.kind
     }
@@ -59,8 +75,21 @@ impl Error {
 
     /// Creates an HTTP response for indicating this error to the client.
     ///
-    /// No body will be provided (`()`), but the caller can `map` the result to
-    /// supply one.
+    /// No body will be provided (hence the `()` body type), but the caller can
+    /// `map` the result to supply one.
+    ///
+    /// # Example
+    ///
+    /// Call `map` on the response to supply your own HTTP payload:
+    ///
+    /// ```
+    /// use hyperdrive::{Error, ErrorKind};
+    /// use hyper::Body;
+    ///
+    /// let error = Error::from_kind(ErrorKind::NoMatchingRoute);
+    /// let response = error.response()
+    ///     .map(|()| Body::from("oh no!"));
+    /// ```
     pub fn response(&self) -> http::Response<()> {
         let mut builder = http::Response::builder();
         builder.status(self.http_status());
@@ -91,10 +120,12 @@ impl Error {
         Box::new(Err(BoxedError::from(self)).into_future())
     }
 
-    /// If `self` is of type `ErrorKind::WrongMethod`, returns the list of
+    /// If `self` is of type [`ErrorKind::WrongMethod`], returns the list of
     /// allowed methods.
     ///
     /// Returns `None` if `self` is a different kind of error.
+    ///
+    /// [`ErrorKind::WrongMethod`]: enum.ErrorKind.html#variant.WrongMethod
     pub fn allowed_methods(&self) -> Option<&[&'static http::Method]> {
         if self.kind() == ErrorKind::WrongMethod {
             Some(&self.allowed_methods)
@@ -125,15 +156,25 @@ impl error::Error for Error {
 /// The different kinds of errors that can occur when using this library.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ErrorKind {
-    /// Failed to parse query params. 400 Bad Request.
+    /// Failed to parse query parameters.
+    ///
+    /// 400 Bad Request.
     QueryParam,
-    /// Failed to deserialize the body. 400 Bad Request.
+    /// Failed to deserialize the request body.
+    ///
+    /// 400 Bad Request.
     Body,
-    /// Failed to parse path segment using `FromStr` impl. 404 Not Found.
+    /// Failed to parse path segment using `FromStr` implementation.
+    ///
+    /// 404 Not Found.
     PathSegment,
-    /// No route matched the request URL. 404 Not Found.
+    /// No route matched the request URL.
+    ///
+    /// 404 Not Found.
     NoMatchingRoute,
-    /// Endpoint doesn't support this method (but does support a different one).
+    /// The invoked endpoint doesn't support this method (but does support a
+    /// different one).
+    ///
     /// 405 Method Not Allowed.
     WrongMethod,
 
