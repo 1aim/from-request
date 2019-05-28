@@ -117,7 +117,7 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
     let all_regexes = &all_regexes;
 
     // Ensure that there's at least 1 way for us to instantiate the type
-    if pathmap.paths().next().is_none() {
+    if !variant_data.iter().any(|v| v.constructible()) {
         // Not a single route attribute in the entire item. This situation would lead to "cannot
         // infer type for `T`" errors.
         // FIXME: This should not be happening, we *want* to be able to create structs without a
@@ -127,7 +127,11 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
         } else {
             "at least one variant of"
         };
-        panic!("{} `{}` must have a route attribute", what, s.ast().ident);
+        panic!(
+            "{} `{}` must be constructible (add a route attribute or a `#[forward]` field)",
+            what,
+            s.ast().ident
+        );
     }
 
     let capturing_regexes = pathmap
@@ -350,6 +354,39 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
         })
         .collect::<Vec<_>>();
 
+    // The `lazy_static!` declarations containing the route regexes
+    let statics = if all_regexes.is_empty() {
+        // No routes
+        quote! {}
+    } else {
+        quote! {
+            lazy_static! {
+                static ref ROUTES: RegexSet = RegexSet::new(&[
+                    #(#all_regexes,)*
+                ][..]).expect("invalid regex from FromRequest derive");
+
+                static ref REGEXES: Vec<Option<Regex>> = vec![
+                    #(#capturing_regexes,)*
+                ];
+            }
+        }
+    };
+
+    // An expression evaluating to the index of the matching regex (or `None`)
+    let matching_regex = if all_regexes.is_empty() {
+        quote!(None)
+    } else {
+        quote! {{
+            let matches = ROUTES.matches(path);
+            debug_assert!(
+                matches.iter().count() <= 1,
+                "internal error: FromRequest derive produced overlapping regexes (path={},method={},regexes={:?})",
+                path, method, &[ #(#all_regexes),* ]
+            );
+            matches.iter().next()
+        }}
+    };
+
     // Don't automatically add bounds, we'll do that ourselves
     s.add_bounds(AddBounds::None);
 
@@ -403,25 +440,11 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
 
                 // Step 1: Match against the generated regex set and inspect the HTTP
                 // method in order to find the route that matches.
-                lazy_static! {
-                    static ref ROUTES: RegexSet = RegexSet::new(&[
-                        #(#all_regexes,)*
-                    ][..]).expect("invalid regex from FromRequest derive");
-
-                    static ref REGEXES: Vec<Option<Regex>> = vec![
-                        #(#capturing_regexes,)*
-                    ];
-                }
+                #statics
 
                 let method = request.method();
                 let path = request.uri().path();
-                let matches = ROUTES.matches(path);
-                debug_assert!(
-                    matches.iter().count() <= 1,
-                    "internal error: FromRequest derive produced overlapping regexes (path={},method={},regexes={:?})",
-                    path, method, &[ #(#all_regexes),* ]
-                );
-                let index = matches.iter().next();
+                let index: Option<usize> = #matching_regex;
 
                 let variant = match (index, method) {
                     #(#regex_match_arms)*
@@ -710,26 +733,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
-    fn bla() {
-        expand! {
-            #[derive(FromRequest)]
-            enum Enum {
-                #[get("/")]
-                First {
-                    #[forward]
-                    _inner: Inner,
-                },
-
-                Second {
-                    #[forward]
-                    _inner: Inner,
-                },
-            }
-        }
-    }
-
-    #[test]
     #[should_panic(expected = "synstructure does not handle untagged unions")]
     // FIXME bad error message
     fn on_union() {
@@ -750,7 +753,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "at least one variant of `Routes` must have a route attribute")]
+    #[should_panic(expected = "at least one variant of `Routes` must be constructible")]
     fn no_route_enum() {
         expand! {
             enum Routes {
@@ -760,7 +763,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "struct `MyStruct` must have a route attribute")]
+    #[should_panic(expected = "struct `MyStruct` must be constructible")]
     fn no_route_struct() {
         expand! {
             struct MyStruct {}

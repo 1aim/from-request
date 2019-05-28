@@ -705,3 +705,43 @@ fn generic_forward() {
         }
     );
 }
+
+#[test]
+fn generic_guard_struct() {
+    #[derive(FromRequest, Debug, PartialEq, Eq)]
+    struct Generic<G, I> {
+        guard: G,
+        #[forward]
+        inner: I,
+    }
+
+    #[derive(FromRequest, Debug, PartialEq, Eq)]
+    enum Inner {
+        #[get("/")]
+        Index,
+    }
+
+    let route: Generic<MyGuard, Inner> =
+        invoke(Request::get("/").body(Body::empty()).unwrap()).unwrap();
+    assert_eq!(
+        route,
+        Generic {
+            guard: MyGuard,
+            inner: Inner::Index
+        }
+    );
+
+    let err: Box<Error> =
+        invoke::<Generic<MyGuard, Inner>>(Request::get("/notfound").body(Body::empty()).unwrap())
+            .unwrap_err()
+            .downcast()
+            .unwrap();
+    assert_eq!(err.kind(), ErrorKind::NoMatchingRoute);
+
+    let err: Box<Error> =
+        invoke::<Generic<MyGuard, Inner>>(Request::post("/").body(Body::empty()).unwrap())
+            .unwrap_err()
+            .downcast()
+            .unwrap();
+    assert_eq!(err.kind(), ErrorKind::WrongMethod);
+}
