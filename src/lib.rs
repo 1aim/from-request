@@ -431,7 +431,7 @@ pub trait FromRequest: Sized {
     /// The future returned by [`from_request`].
     ///
     /// Because `impl Trait` cannot be used inside traits (and named
-    /// existentential types aren't yet stable), the type here might not be
+    /// existential types aren't yet stable), the type here might not be
     /// nameable. In that case, you can set it to
     /// [`DefaultFuture<Self, BoxedError>`][`DefaultFuture`] and box the
     /// returned future.
@@ -545,7 +545,7 @@ pub trait Guard: Sized {
     /// The result returned by [`Guard::from_request`].
     ///
     /// Because `impl Trait` cannot be used inside traits (and named
-    /// existentential types aren't stable), the type here might not be
+    /// existential types aren't stable), the type here might not be
     /// nameable. In that case, you can set it to
     /// [`DefaultFuture<Self, Error>`][`DefaultFuture`] and box the returned
     /// future.
@@ -581,30 +581,92 @@ pub trait Guard: Sized {
 ///
 /// # Examples
 ///
-/// TODO: Example that extracts a `Json<T>`
+/// Collect the whole body and then deserialize it using a serde data format
+/// crate `serde_whatever`:
+///
+/// ```
+/// # use hyperdrive::{FromBody, http, serde, NoContext, DefaultFuture, BoxedError};
+/// # use futures::prelude::*;
+/// # use serde_json as serde_whatever;
+/// struct CustomFormat<T>(T);
+///
+/// impl<T: serde::de::DeserializeOwned + Send + 'static> FromBody for CustomFormat<T> {
+///     type Context = NoContext;
+///     type Result = DefaultFuture<Self, BoxedError>;
+///
+///     fn from_body(
+///         request: &http::Request<()>,
+///         body: hyper::Body,
+///         context: &Self::Context,
+///     ) -> Self::Result {
+///         Box::new(body.concat2().map_err(Into::into).and_then(|body| {
+///             match serde_whatever::from_slice(&body) {
+///                 Ok(t) => Ok(CustomFormat(t)),
+///                 Err(e) => Err(e.into()),
+///             }
+///         }))
+///     }
+/// }
+/// ```
+///
+/// Process the body stream on-the-fly and calculate a checksum by adding all
+/// the bytes:
+///
+/// ```
+/// # use hyperdrive::{FromBody, NoContext, DefaultFuture, BoxedError};
+/// # use futures::prelude::*;
+/// struct BodyChecksum(u8);
+///
+/// impl FromBody for BodyChecksum {
+///     type Context = NoContext;
+///     type Result = DefaultFuture<Self, BoxedError>;
+///
+///     fn from_body(
+///         request: &http::Request<()>,
+///         body: hyper::Body,
+///         context: &Self::Context,
+///     ) -> Self::Result {
+///         Box::new(body
+///             .map_err(BoxedError::from)
+///             .fold(0, |checksum, chunk| -> Result<_, BoxedError> {
+///                 Ok(chunk.as_ref().iter()
+///                     .fold(checksum, |checksum: u8, byte| {
+///                         checksum.wrapping_add(*byte)
+///                 }))
+///             })
+///             .map(|checksum| BodyChecksum(checksum))  // wrap it up to create a `Self`
+///         )
+///     }
+/// }
+/// ```
 ///
 /// [`body`]: body/index.html
 pub trait FromBody: Sized {
-    /// A context parameter passed to `from_body`.
+    /// A context parameter passed to [`from_body`].
     ///
     /// This can be used to pass application-specific data like a logger or a
     /// database connection around.
     ///
     /// If no context is needed, this should be set to [`NoContext`].
     ///
+    /// [`from_body`]: #tymethod.from_body
     /// [`NoContext`]: struct.NoContext.html
     type Context: RequestContext;
 
-    /// The result returned by `from_body`.
+    /// The result returned by [`from_body`].
     ///
     /// Because `impl Trait` cannot be used inside traits (and named
-    /// existentential types aren't stable), the type here might not be
-    /// nameable. In that case, you can set it to `DefaultFuture<Self, Error>`
-    /// and box the returned future.
+    /// existential types aren't stable), the type here might not be
+    /// nameable. In that case, you can set it to
+    /// [`DefaultFuture<Self, Error>`][`DefaultFuture`] and box the returned
+    /// future.
     ///
-    /// If your `FromRequest` implementation doesn't need to return a future
-    /// (eg. because it's just a parsing step), you can set this to
-    /// `Result<Self, ...>` and immediately return the result of the conversion.
+    /// If your `FromBody` implementation doesn't need to return a future, you
+    /// can set this to `Result<Self, BoxedError>` and immediately return the
+    /// result of the conversion.
+    ///
+    /// [`DefaultFuture`]: type.DefaultFuture.html
+    /// [`from_body`]: #tymethod.from_body
     type Result: IntoFuture<Item = Self, Error = BoxedError>;
 
     /// Create a `Self` from an HTTP request body.
@@ -620,6 +682,8 @@ pub trait FromBody: Sized {
     /// * **`request`**: An HTTP request (without body) from the `http` crate.
     /// * **`body`**: The body stream. Implements `futures::Stream`.
     /// * **`context`**: User-defined context.
+    ///
+    /// [`Guard`]: trait.Guard.html
     fn from_body(
         request: &http::Request<()>,
         body: hyper::Body,
