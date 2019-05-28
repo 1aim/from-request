@@ -153,13 +153,15 @@ pub use {lazy_static::lazy_static, regex};
 use futures::{Future, IntoFuture};
 use tokio::runtime::current_thread::Runtime;
 
-/// A default boxed future that may be returned from [`FromRequest`]
-/// implementations.
+/// A default boxed future that may be returned from [`FromRequest`],
+/// [`FromBody`] and [`Guard`] implementations.
 ///
 /// The future is required to be `Send` to allow running it on a multi-threaded
 /// executor.
 ///
 /// [`FromRequest`]: trait.FromRequest.html
+/// [`FromBody`]: trait.FromBody.html
+/// [`Guard`]: trait.Guard.html
 pub type DefaultFuture<T, E> = Box<dyn Future<Item = T, Error = E> + Send>;
 
 /// A boxed `std::error::Error` that can be used when the actual error type is
@@ -472,58 +474,85 @@ pub trait FromRequest: Sized {
 /// For example, this could be used to extract an `Authorization` header and
 /// verify user credentials, or to look up a session token in a database.
 ///
-/// A `Guard` can not access the request body. If you need to do that, refer to
+/// A `Guard` can not access the request body. If you need to do that, implement
 /// [`FromBody`] instead.
 ///
-/// TODO: Better docs and examples
+/// # Examples
+///
+/// ```
+/// # use hyperdrive::{Guard, http, NoContext, BoxedError};
+/// struct MustFrobnicate;
+///
+/// impl Guard for MustFrobnicate {
+///     type Context = NoContext;
+///     type Result = Result<Self, BoxedError>;
+///
+///     fn from_request(request: &http::Request<()>, context: &Self::Context) -> Self::Result {
+///         if request.headers().contains_key("X-Frobnicate") {
+///             Ok(MustFrobnicate)
+///         } else {
+///             let msg = "request did not contain mandatory `X-Frobnicate` header";
+///             Err(String::from(msg).into())
+///         }
+///     }
+/// }
+/// ```
 ///
 /// [`FromBody`]: trait.FromBody.html
 pub trait Guard: Sized {
-    /// A context parameter passed to `from_request`.
+    /// A context parameter passed to [`Guard::from_request`].
     ///
-    /// This can be used to pass application-specific data like a logger or a
-    /// database connection around.
+    /// This can be used to pass application-specific data like a database
+    /// connection or server configuration (eg. for limiting the maximum HTTP
+    /// request size) around.
     ///
     /// If no context is needed, this should be set to [`NoContext`].
     ///
+    /// [`Guard::from_request`]: #tymethod.from_request
     /// [`NoContext`]: struct.NoContext.html
     type Context: RequestContext;
 
-    /// The result returned by `from_request`.
+    /// The result returned by [`Guard::from_request`].
     ///
     /// Because `impl Trait` cannot be used inside traits (and named
     /// existentential types aren't stable), the type here might not be
-    /// nameable. In that case, you can set it to `DefaultFuture<Self, Error>`
-    /// and box the returned future.
+    /// nameable. In that case, you can set it to
+    /// [`DefaultFuture<Self, Error>`][`DefaultFuture`] and box the returned future.
     ///
-    /// If your `FromRequest` implementation doesn't need to return a future
+    /// If your `Guard` implementation doesn't need to return a future
     /// (eg. because it's just a parsing step), you can set this to
     /// `Result<Self, ...>` and immediately return the result of the conversion.
+    ///
+    /// [`Guard::from_request`]: #tymethod.from_request
+    /// [`DefaultFuture`]: type.DefaultFuture.html
     type Result: IntoFuture<Item = Self, Error = BoxedError>;
 
     /// Create a `Self` from HTTP request data.
     ///
     /// This can inspect HTTP headers and other data provided by
-    /// `http::Request`, but can not access the body of the request. If access
-    /// to the body is needed, `FromBody` must be implemented instead.
+    /// [`http::Request`], but can not access the body of the request. If access
+    /// to the body is needed, [`FromBody`] must be implemented instead.
     ///
     /// # Parameters
     ///
     /// * **`request`**: An HTTP request (without body) from the `http` crate.
     /// * **`context`**: User-defined context needed by the guard.
+    ///
+    /// [`http::Request`]: ../http/request/struct.Request.html
+    /// [`FromBody`]: trait.FromBody.html
     fn from_request(request: &http::Request<()>, context: &Self::Context) -> Self::Result;
 }
 
 /// Asynchronous conversion from an HTTP request body.
 ///
-/// Types implementing this trait are provided in the [`body` module]. They
+/// Types implementing this trait are provided in the [`body`] module. They
 /// allow easy deserialization from a variety of data formats.
 ///
 /// # Examples
 ///
 /// TODO: Example that extracts a `Json<T>`
 ///
-/// [`body` module]: body/index.html
+/// [`body`]: body/index.html
 pub trait FromBody: Sized {
     /// A context parameter passed to `from_body`.
     ///
