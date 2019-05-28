@@ -479,6 +479,8 @@ pub trait FromRequest: Sized {
 ///
 /// # Examples
 ///
+/// Define a guard that ensures that required request headers are present:
+///
 /// ```
 /// # use hyperdrive::{Guard, http, NoContext, BoxedError};
 /// struct MustFrobnicate;
@@ -493,6 +495,34 @@ pub trait FromRequest: Sized {
 ///         } else {
 ///             let msg = "request did not contain mandatory `X-Frobnicate` header";
 ///             Err(String::from(msg).into())
+///         }
+///     }
+/// }
+/// ```
+///
+/// Use server settings stored in a `Context` to exclude certain user agents:
+///
+/// ```
+/// # use hyperdrive::{Guard, RequestContext, BoxedError};
+/// #[derive(RequestContext)]
+/// struct ForbiddenAgents {
+///     agents: Vec<String>,
+/// }
+///
+/// struct RejectForbiddenAgents;
+///
+/// impl Guard for RejectForbiddenAgents {
+///     type Context = ForbiddenAgents;
+///     type Result = Result<Self, BoxedError>;
+///
+///     fn from_request(request: &http::Request<()>, context: &Self::Context) -> Self::Result {
+///         let agent = request.headers().get("User-Agent")
+///             .ok_or_else(|| String::from("No User-Agent header"))?;
+///
+///         if context.agents.iter().any(|f| f == agent) {
+///             Err(String::from("This User-Agent is forbidden!").into())
+///         } else {
+///             Ok(RejectForbiddenAgents)
 ///         }
 ///     }
 /// }
