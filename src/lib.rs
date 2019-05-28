@@ -547,11 +547,12 @@ pub trait Guard: Sized {
     /// Because `impl Trait` cannot be used inside traits (and named
     /// existentential types aren't stable), the type here might not be
     /// nameable. In that case, you can set it to
-    /// [`DefaultFuture<Self, Error>`][`DefaultFuture`] and box the returned future.
+    /// [`DefaultFuture<Self, Error>`][`DefaultFuture`] and box the returned
+    /// future.
     ///
-    /// If your `Guard` implementation doesn't need to return a future
-    /// (eg. because it's just a parsing step), you can set this to
-    /// `Result<Self, ...>` and immediately return the result of the conversion.
+    /// If your guard doesn't need to return a future (eg. because it's just a
+    /// parsing step), you can set this to `Result<Self, BoxedError>` and
+    /// immediately return the result of the conversion.
     ///
     /// [`Guard::from_request`]: #tymethod.from_request
     /// [`DefaultFuture`]: type.DefaultFuture.html
