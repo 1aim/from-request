@@ -501,7 +501,7 @@ pub trait FromRequest: Sized {
 /// Define a guard that ensures that required request headers are present:
 ///
 /// ```
-/// # use hyperdrive::{Guard, http, NoContext, BoxedError};
+/// # use hyperdrive::{Guard, NoContext, BoxedError};
 /// struct MustFrobnicate;
 ///
 /// impl Guard for MustFrobnicate {
@@ -604,7 +604,7 @@ pub trait Guard: Sized {
 /// crate `serde_whatever`:
 ///
 /// ```
-/// # use hyperdrive::{FromBody, http, serde, NoContext, DefaultFuture, BoxedError};
+/// # use hyperdrive::{FromBody, NoContext, DefaultFuture, BoxedError};
 /// # use futures::prelude::*;
 /// # use serde_json as serde_whatever;
 /// struct CustomFormat<T>(T);

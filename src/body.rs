@@ -39,7 +39,7 @@ use serde::de::DeserializeOwned;
 /// ```
 ///
 /// ```
-/// # use hyperdrive::{FromRequest, body::HtmlForm, serde::Deserialize, http, NoContext};
+/// # use hyperdrive::{FromRequest, body::HtmlForm, serde::Deserialize, NoContext};
 /// #[derive(Deserialize)]
 /// struct LoginData {
 ///     id: u32,
