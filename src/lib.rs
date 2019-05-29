@@ -1,4 +1,20 @@
-//! Composable asynchronous HTTP request routing, guarding and decoding.
+//! Composable (a)synchronous HTTP request routing, guarding and decoding.
+//!
+//! This crate provides [Rocket]-inspired HTTP route definitions based on
+//! attributes (`#[get("/user/{id}")]`). It is based on the [`hyper`]
+//! and [`http`] crates, works on **stable Rust**, and supports writing both
+//! synchronous and asynchronous (via [futures 0.1]) apps.
+//!
+//! Check out the examples below for a small taste of how this library can be
+//! used. If you want to dive in deeper, you can check out the [`FromRequest`]
+//! trait, which provides the custom derive that powers most of the magic in
+//! this crate.
+//!
+//! [Rocket]: https://rocket.rs/
+//! [`hyper`]: https://hyper.rs/
+//! [`http`]: https://docs.rs/http
+//! [futures 0.1]: https://docs.rs/futures/0.1
+//! [`FromRequest`]: trait.FromRequest.html
 //!
 //! # Examples
 //!
@@ -275,7 +291,7 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// The custom derive will create a `HEAD` route for every defined `GET` route,
 /// unless you define one yourself. If your app uses [`AsyncService`] or
 /// [`SyncService`], those adapters will automatically take care of dropping the
-/// body from the response. If you manually call
+/// body from the response to `HEAD` requests. If you manually call
 /// [`FromRequest::from_request`][`from_request`], you have to make sure no body
 /// is sent back for `HEAD` requests.
 ///
@@ -321,9 +337,9 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// },
 /// ```
 ///
-/// The type of the field must implement [`FromBody`]. The
-/// [`body` module][`body`] contains predefined adapters implementing that
-/// trait, which work with any type implementing `Deserialize`.
+/// The type of the field must implement [`FromBody`]. The [`body`] module
+/// contains predefined adapters implementing that trait, which work with any
+/// type implementing `Deserialize`.
 ///
 /// ### Extracting query parameters (`#[query_params]` attribute)
 ///
@@ -378,6 +394,10 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// Currently, this is limited to `FromRequest` implementations that use the
 /// same `Context` as the outer type (ie. no automatic `AsRef` conversion will
 /// take place).
+///
+/// A variant or struct defining a `#[forward]` field does not have to define
+/// a route. If no other route matches, this variant will automatically be
+/// created, and is considered a *fallback route*.
 ///
 /// ## Changing the `Context` type
 ///
@@ -440,10 +460,9 @@ pub trait FromRequest: Sized {
     /// [`from_request`]: #tymethod.from_request
     type Future: Future<Item = Self, Error = BoxedError> + Send;
 
-    /// Create a `Self` from an HTTP request.
+    /// Create a `Self` from an HTTP request, asynchronously.
     ///
-    /// This consumes the request *and* the context. You can set the context
-    /// type to something like `Arc<Data>` to avoid expensive clones.
+    /// This consumes the request *and* the context.
     ///
     /// # Parameters
     ///
