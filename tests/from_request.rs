@@ -745,3 +745,33 @@ fn generic_guard_struct() {
             .unwrap();
     assert_eq!(err.kind(), ErrorKind::WrongMethod);
 }
+
+#[test]
+fn generic_guard_struct_2() {
+    #[derive(FromRequest, Debug, PartialEq, Eq)]
+    struct Generic<G> {
+        guard: G,
+        #[forward]
+        inner: Inner,
+    }
+
+    #[derive(FromRequest, Debug, PartialEq, Eq)]
+    enum Inner {
+        #[get("/")]
+        Index,
+    }
+
+    let err: Box<Error> =
+        invoke::<Generic<MyGuard>>(Request::get("/notfound").body(Body::empty()).unwrap())
+            .unwrap_err()
+            .downcast()
+            .unwrap();
+    assert_eq!(err.kind(), ErrorKind::NoMatchingRoute);
+
+    let err: Box<Error> =
+        invoke::<Generic<MyGuard>>(Request::post("/").body(Body::empty()).unwrap())
+            .unwrap_err()
+            .downcast()
+            .unwrap();
+    assert_eq!(err.kind(), ErrorKind::WrongMethod);
+}
