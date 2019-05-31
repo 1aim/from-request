@@ -71,7 +71,7 @@ mod parse;
 use self::parse::{FieldKind, ItemData, PathMap, VariantData};
 use proc_macro2::{Ident, Span, TokenStream};
 use quote::{quote, ToTokens};
-use std::iter;
+use std::iter::{self, FromIterator};
 use synstructure::{AddBounds, Structure, VariantInfo};
 
 pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
@@ -390,15 +390,26 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
     // Don't automatically add bounds, we'll do that ourselves
     s.add_bounds(AddBounds::None);
 
+    // Whether the impl is generic over types (ie. has type parameters)
+    let is_type_generic = s.ast().generics.type_params().next().is_some();
+
     let bounds = generate_trait_bounds(&item_data, &variant_data);
 
-    let where_clause = if s.ast().generics.type_params().next().is_none() {
+    let where_clause = if !is_type_generic {
         // Don't add where clause if there are no generics
         TokenStream::new()
     } else {
+        let impl_bounds = bounds.impl_bounds;
         quote! {
-            where #(#bounds),*
+            where #(#impl_bounds),*
         }
+    };
+
+    // `add_impl_generic` is ignored when using `gen_impl`, so build the generics ourselves.
+    let impl_generics = if is_type_generic {
+        bounds.addl_ty_params
+    } else {
+        Vec::new()
     };
 
     s.gen_impl(quote!(
@@ -414,11 +425,14 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
         use core::convert::AsRef;
         use core::str::FromStr;
 
-        gen impl FromRequest for @Self #where_clause {
+        gen impl<#(#impl_generics),*> FromRequest for @Self #where_clause {
             type Future = DefaultFuture<Self, BoxedError>;
             type Context = #context;
 
-            fn from_request(request: http::Request<hyper::Body>, context: Self::Context) -> Self::Future {
+            fn from_request(
+                request: http::Request<hyper::Body>,
+                context: Self::Context,
+            ) -> Self::Future {
                 // Step 0: `Variant` has all variants of the input enum that have a route attribute
                 // but without any data.
                 enum Variant {
@@ -458,90 +472,174 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
     ))
 }
 
-fn generate_trait_bounds(item: &ItemData, variants: &[VariantData]) -> Vec<TokenStream> {
+/// Information about trait bounds that need to hold for a `FromRequest` impl to be applicable.
+struct Bounds {
+    /// Additional type parameters to add to the impl.
+    ///
+    /// User-defined type params on the type are always kept.
+    addl_ty_params: Vec<Ident>,
+
+    /// `where`-clause trait bounds to add to the generated `FromRequest` impl.
+    impl_bounds: Vec<TokenStream>,
+}
+
+/// This impl enables `collect()`ing an iterator yielding `Bounds` into a single `Bounds` struct.
+impl FromIterator<Bounds> for Bounds {
+    fn from_iter<T: IntoIterator<Item = Self>>(iter: T) -> Self {
+        let mut addl_ty_params = Vec::new();
+        let mut impl_bounds = Vec::new();
+        for bounds in iter {
+            addl_ty_params.extend(bounds.addl_ty_params);
+            impl_bounds.extend(bounds.impl_bounds);
+        }
+
+        Self {
+            addl_ty_params,
+            impl_bounds,
+        }
+    }
+}
+
+fn generate_trait_bounds(item: &ItemData, variants: &[VariantData]) -> Bounds {
     let context = item
         .context()
         .map(|c| c.into_token_stream())
         .unwrap_or_else(|| quote!(::hyperdrive::NoContext));
 
-    variants
+    let mut ty_param_counter = 0;
+    let mut ty_params = Vec::new();
+
+    // Creates a unique type parameter containing the given name, and adds it to the returned
+    // `Bounds`
+    let mut mkty = |name| -> Ident {
+        let ident = Ident::new(&format!("_hyperdrive_{}_{}", name, ty_param_counter), Span::call_site());
+        ty_param_counter += 1;
+        ty_params.push(ident.clone());
+        ident
+    };
+
+    let mut bounds: Bounds = variants
         .iter()
         .flat_map(|v| v.field_uses())
-        .flat_map(|(field, field_kind)| {
+        .map(|(field, field_kind)| {
             let ty = field.ty.clone();
             match field_kind {
-                FieldKind::PathSegment => vec![
-                    quote!( #ty:
-                        ::std::str::FromStr + ::std::marker::Send + 'static
-                    ),
-                    quote!( <#ty as ::std::str::FromStr>::Err:
-                        ::std::error::Error + ::std::marker::Sync + ::std::marker::Send + 'static
-                    ),
-                ],
-                FieldKind::QueryParams => vec![quote!( #ty:
-                    ::hyperdrive::serde::de::DeserializeOwned +
-                    ::std::marker::Send +
-                    'static
-                )],
-                FieldKind::Body => {
-                    vec![
+                FieldKind::PathSegment => Bounds {
+                    addl_ty_params: Vec::new(),
+                    impl_bounds: vec![
                         quote!( #ty:
-                            ::hyperdrive::FromBody +
-                            ::std::marker::Send +
-                            'static
+                            ::std::str::FromStr + ::std::marker::Send + 'static
                         ),
-                        quote!( #context: AsRef<<#ty as ::hyperdrive::FromBody>::Context> ),
-                        // better implied bounds plz
-                        quote!( <#ty as ::hyperdrive::FromBody>::Result:
-                            ::hyperdrive::futures::IntoFuture<
-                                Item=#ty, Error=::hyperdrive::BoxedError
-                            > +
-                            ::std::marker::Send +
-                            'static
+                        quote!( <#ty as ::std::str::FromStr>::Err:
+                            ::std::error::Error + ::std::marker::Sync + ::std::marker::Send + 'static
                         ),
-                        quote!(
-                            <
-                                <#ty as ::hyperdrive::FromBody>::Result as
-                                ::hyperdrive::futures::IntoFuture
-                            >::Future: ::std::marker::Send
-                        ),
-                    ]
-                }
-                FieldKind::Guard => {
-                    vec![
-                        quote!( #ty:
-                            ::hyperdrive::Guard +
-                            ::std::marker::Send +
-                            'static
-                        ),
-                        quote!( #context: AsRef<<#ty as ::hyperdrive::Guard>::Context> ),
-                        // better implied bounds plz
-                        quote!( <#ty as ::hyperdrive::Guard>::Result:
-                            ::hyperdrive::futures::IntoFuture<
-                                Item=#ty, Error=::hyperdrive::BoxedError
-                            > +
-                            ::std::marker::Send +
-                            'static
-                        ),
-                        quote!(
-                            <
-                                <#ty as ::hyperdrive::Guard>::Result as
-                                ::hyperdrive::futures::IntoFuture
-                            >::Future: ::std::marker::Send
-                        ),
-                    ]
-                }
-                FieldKind::Forward => vec![
-                    // FIXME: support `AsRef` conversion here too
-                    quote!( #ty:
-                        ::hyperdrive::FromRequest<Context=#context> +
+                    ],
+                },
+                FieldKind::QueryParams => Bounds {
+                    addl_ty_params: Vec::new(),
+                    impl_bounds: vec![quote!( #ty:
+                        ::hyperdrive::serde::de::DeserializeOwned +
                         ::std::marker::Send +
                         'static
-                    ),
-                ],
+                    )],
+                },
+                FieldKind::Body => {
+                    let frombody_context = mkty("FromBody_Context");
+                    let frombody_result = mkty("FromBody_Result");
+                    let frombody_result_future = mkty("FromBody_Result_Future");
+                    Bounds {
+                        addl_ty_params: Vec::new(),
+                        impl_bounds: vec![
+                            quote!( #ty:
+                                ::hyperdrive::FromBody<
+                                    Context=#frombody_context,
+                                    Result=#frombody_result,
+                                > +
+                                ::std::marker::Send +
+                                'static
+                            ),
+                            quote!( #context: AsRef<#frombody_context> ),
+                            // better implied bounds plz
+                            quote!( #frombody_context:
+                                ::hyperdrive::RequestContext
+                            ),
+                            quote!( #frombody_result:
+                                ::hyperdrive::futures::IntoFuture<
+                                    Item=#ty,
+                                    Error=::hyperdrive::BoxedError,
+                                    Future=#frombody_result_future,
+                                > +
+                                ::std::marker::Send +
+                                'static
+                            ),
+                            quote!( #frombody_result_future:
+                                ::hyperdrive::futures::Future<
+                                    Item=#ty,
+                                    Error=::hyperdrive::BoxedError,
+                                > +
+                                ::std::marker::Send +
+                                'static
+                            ),
+                        ],
+                    }
+                },
+                FieldKind::Guard => {
+                    let guard_context = mkty("Guard_Context");
+                    let guard_result = mkty("Guard_Result");
+                    let guard_result_future = mkty("Guard_Result_Future");
+                    Bounds {
+                        addl_ty_params: Vec::new(),
+                        impl_bounds: vec![
+                            quote!( #ty:
+                                ::hyperdrive::Guard<
+                                    Context=#guard_context,
+                                    Result=#guard_result,
+                                > +
+                                ::std::marker::Send +
+                                'static
+                            ),
+                            quote!( #context: AsRef<#guard_context> ),
+                            // better implied bounds plz
+                            quote!( #guard_context:
+                                ::hyperdrive::RequestContext
+                            ),
+                            quote!( #guard_result:
+                                ::hyperdrive::futures::IntoFuture<
+                                    Item=#ty,
+                                    Error=::hyperdrive::BoxedError,
+                                    Future=#guard_result_future,
+                                > +
+                                ::std::marker::Send +
+                                'static
+                            ),
+                            quote!( #guard_result_future:
+                                ::hyperdrive::futures::Future<
+                                    Item=#ty,
+                                    Error=::hyperdrive::BoxedError,
+                                > +
+                                ::std::marker::Send +
+                                'static
+                            ),
+                        ],
+                    }
+                },
+                FieldKind::Forward => Bounds {
+                    addl_ty_params: Vec::new(),
+                    impl_bounds: vec![
+                        // FIXME: support `AsRef` conversion here too
+                        quote!( #ty:
+                            ::hyperdrive::FromRequest<Context=#context> +
+                            ::std::marker::Send +
+                            'static
+                        ),
+                    ],
+                },
             }
         })
-        .collect()
+        .collect();
+
+    bounds.addl_ty_params.extend(ty_params);
+    bounds
 }
 
 /// Generates all the code needed to build an enum variant from a matching
@@ -633,7 +731,7 @@ fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStre
         quote!()
     };
 
-    // Last step, chain all the asynchronous operations (guards and body).
+    // Last step, chain all the asynchronous operations (guards, #[body] and #[forward]).
     // Reverse order because we have to chain everything with `.and_then`.
 
     // Construct the final value from the `fld_X` variables
