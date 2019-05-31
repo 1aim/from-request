@@ -392,18 +392,45 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// since both consume the request body.
 ///
 /// Currently, this is limited to `FromRequest` implementations that use the
-/// same `Context` as the outer type (ie. no automatic `AsRef` conversion will
-/// take place).
+/// same [`RequestContext`] as the outer type (ie. no automatic `AsRef`
+/// conversion will take place).
 ///
 /// A variant or struct defining a `#[forward]` field does not have to define
 /// a route. If no other route matches, this variant will automatically be
 /// created, and is considered a *fallback route*.
 ///
+/// Combined with generics, this feature can be used to make request wrappers
+/// that attach a guard or a guard group to any type implementing `FromRequest`:
+///
+/// ```
+/// use hyperdrive::{FromRequest, Guard};
+/// # use hyperdrive::{NoContext, BoxedError};
+///
+/// struct User;
+/// impl Guard for User {
+///     // (omitted for brevity)
+/// #     type Context = NoContext;
+/// #     type Result = Result<Self, BoxedError>;
+/// #     fn from_request(_: &http::Request<()>, _: &NoContext) -> Result<Self, BoxedError> {
+/// #         Ok(User)
+/// #     }
+/// }
+///
+/// #[derive(FromRequest)]
+/// struct Authenticated<T> {
+///     user: User,
+///
+///     #[forward]
+///     inner: T,
+/// }
+/// ```
+///
 /// ## Changing the `Context` type
 ///
 /// By default, the generated code will use [`NoContext`] as the associated
-/// `Context` type. You can change this by putting a `#[context(MyContext)]`
-/// attribute on the type:
+/// `Context` type. You can change this to any other type that implements
+/// [`RequestContext`] by putting a `#[context(MyContext)]` attribute on the
+/// type:
 ///
 /// ```
 /// # struct MyDatabaseConnection;
@@ -519,7 +546,8 @@ pub trait FromRequest: Sized {
 /// }
 /// ```
 ///
-/// Use server settings stored in a `Context` to exclude certain user agents:
+/// Use server settings stored in a [`RequestContext`] to exclude certain user
+/// agents:
 ///
 /// ```
 /// # use hyperdrive::{Guard, RequestContext, BoxedError};
@@ -548,6 +576,7 @@ pub trait FromRequest: Sized {
 /// ```
 ///
 /// [`FromBody`]: trait.FromBody.html
+/// [`RequestContext`]: trait.RequestContext.html
 pub trait Guard: Sized {
     /// A context parameter passed to [`Guard::from_request`].
     ///
