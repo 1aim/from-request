@@ -168,6 +168,9 @@ pub use {lazy_static::lazy_static, regex};
 
 use futures::{Future, IntoFuture};
 use tokio::runtime::current_thread::Runtime;
+use doc_comment::doctest;
+
+doctest!("../README.md");
 
 /// A default boxed future that may be returned from [`FromRequest`],
 /// [`FromBody`] and [`Guard`] implementations.

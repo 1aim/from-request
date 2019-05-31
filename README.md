@@ -17,4 +17,80 @@ releases.
 
 ## Example
 
-TODO
+This example shows how to use Hyperdrive to define routes for a simple
+webservice and how to spin up a hyper server that will serve these routes with a
+user-provided sync handler:
+
+```rust
+use hyperdrive::{FromRequest, body::Json, service::SyncService};
+use hyper::{Server, Body, Client};
+use http::{Response, Request, StatusCode};
+use futures::prelude::*;
+use serde::Deserialize;
+
+#[derive(FromRequest)]
+enum Route {
+    #[get("/")]
+    Index,
+
+    #[get("/users/{id}")]
+    User {
+        /// Taken from request path
+        id: u32,
+    },
+
+    #[post("/login")]
+    Login {
+        #[body]
+        data: Json<Login>,
+    },
+}
+
+#[derive(Deserialize)]
+struct Login {
+    email: String,
+    password: String,
+}
+
+fn main() {
+    // Prepare a hyper server using Hyperdrive's `SyncService` adapter.
+    // If you want to write an async handler, you could use `AsyncService` instead.
+    let srv = Server::bind(&"127.0.0.1:0".parse().unwrap())
+        .serve(SyncService::new(|route: Route| {
+            match route {
+                Route::Index => {
+                    Response::new(Body::from("Hello World!"))
+                }
+                Route::User { id } => {
+                    Response::new(Body::from(format!("User #{}", id)))
+                }
+                Route::Login { data } => {
+                    if data.password == "hunter2" {
+                        Response::new(Body::from(format!("Welcome, {}!", data.email)))
+                    } else {
+                        Response::builder()
+                            .status(StatusCode::UNAUTHORIZED)
+                            .body(Body::from("Invalid username or password"))
+                            .expect("building response failed")
+                    }
+                }
+            }
+        }));
+
+    // Let's make a login request to it
+    let port = srv.local_addr().port();
+    let request = Client::new().request(
+        Request::builder()
+            .uri(format!("http://127.0.0.1:{}/login", port))
+            .body(Body::from(r#"{ "email": "oof@example.com", password: "hunter2" }"#))
+            .expect("failed to build request")
+    ).map(|response| {
+        // The login should succeed
+        assert_eq!(response.status(), StatusCode::OK);
+    });
+
+    tokio::run(srv.with_graceful_shutdown(request).map_err(|e| {
+        panic!("unexpected error: {}", e);
+    }));
+}
+```
