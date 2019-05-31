@@ -34,7 +34,7 @@ use std::sync::Arc;
 /// This type stores an async request handler `H` and the context needed by the
 /// [`FromRequest`] implementation. The context is cloned for every request.
 ///
-/// ## Type Parameters
+/// # Type Parameters
 ///
 /// * **`H`**: The handler closure. Takes a [`FromRequest`] implementor `R` and
 ///   returns a future resolving to the response to return to the client. Shared
@@ -42,6 +42,34 @@ use std::sync::Arc;
 /// * **`R`**: The request type expected by the handler `H`. Implements
 ///   `FromRequest`.
 /// * **`F`**: The `Future` returned by the handler closure `H`.
+///
+/// # Examples
+///
+/// ```
+/// use hyperdrive::{FromRequest, service::AsyncService};
+/// use hyper::{Server, Response, Body};
+/// use futures::prelude::*;
+///
+/// #[derive(FromRequest)]
+/// enum Route {
+///     #[get("/")]
+///     Index,
+/// }
+///
+/// let service = AsyncService::new(|route: Route| {
+///     // The closure is called with the `FromRequest`-implementing type and
+///     // has to return any type implementing `Future`.
+///     match route {
+///         Route::Index => {
+///             Ok(Response::new(Body::from("Hello World!"))).into_future()
+///         }
+///     }
+/// });
+///
+/// // Create the server future:
+/// let srv = Server::bind(&"127.0.0.1:0".parse().unwrap())
+///    .serve(service);
+/// ```
 ///
 /// [`FromRequest`]: ../trait.FromRequest.html
 /// [`hyperdrive::Error`]: ../struct.Error.html
@@ -223,6 +251,35 @@ where
 /// blocking app. Writing sync code is much simpler than writing async code
 /// (even with async/await syntax), so depending on your app this might be a
 /// good tradeoff.
+///
+/// # Type Parameters
+///
+/// * **`H`**: The handler closure. It is called with the request type `R` and
+///   has to return the `Response<Body>` to send to the client.
+/// * **`R`**: The request type implementing `FromRequest`.
+///
+/// # Examples
+///
+/// ```
+/// use hyperdrive::{FromRequest, service::SyncService};
+/// use hyper::{Response, Body, Server};
+///
+/// #[derive(FromRequest)]
+/// enum Route {
+///     #[get("/")]
+///     Index,
+/// }
+///
+/// let service = SyncService::new(|route: Route| {
+///     match route {
+///         Route::Index => Response::new(Body::from("Hello world!")),
+///     }
+/// });
+///
+/// // Create the server future:
+/// let srv = Server::bind(&"127.0.0.1:0".parse().unwrap())
+///    .serve(service);
+/// ```
 ///
 /// [`AsyncService`]: struct.AsyncService.html
 /// [`hyperdrive::Error`]: ../struct.Error.html
