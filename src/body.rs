@@ -17,6 +17,25 @@
 use crate::{BoxedError, DefaultFuture, FromBody, NoContext};
 use futures::{Future, Stream};
 use serde::de::DeserializeOwned;
+use std::ops::{Deref, DerefMut};
+
+macro_rules! deref {
+    ($t:ty) => {
+        impl<T: DeserializeOwned + Send + 'static> Deref for $t {
+            type Target = T;
+
+            fn deref(&self) -> &T {
+                &self.0
+            }
+        }
+
+        impl<T: DeserializeOwned + Send + 'static> DerefMut for $t {
+            fn deref_mut(&mut self) -> &mut T {
+                &mut self.0
+            }
+        }
+    };
+}
 
 /// Decodes an `x-www-form-urlencoded` request body (eg. sent by an HTML form).
 ///
@@ -93,6 +112,8 @@ impl<T: DeserializeOwned + Send + 'static> FromBody for HtmlForm<T> {
     }
 }
 
+deref!(HtmlForm<T>);
+
 /// Decodes a JSON-encoded request body.
 ///
 /// The [`FromBody`] implementation of this type will retrieve the request body
@@ -164,3 +185,5 @@ impl<T: DeserializeOwned + Send + 'static> FromBody for Json<T> {
         }))
     }
 }
+
+deref!(Json<T>);
