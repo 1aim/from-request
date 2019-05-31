@@ -378,9 +378,45 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// ## Guards
 ///
 /// Guards can be used to prevent a route from being called when a condition is
-/// not fulfilled (for example, when the user isn't logged in). All fields that
-/// are neither mentioned in the route path nor annotated with an attribute are
-/// considered guards and thus must implement the [`Guard`] trait.
+/// not fulfilled (for example, when the user isn't logged in). They can also
+/// extract arbitrary data from the request headers (eg. a session ID, or the
+/// User-Agent string).
+///
+/// All fields that are neither mentioned in the route path nor annotated with
+/// an attribute are considered guards and thus must implement the [`Guard`]
+/// trait.
+///
+/// ```
+/// use hyperdrive::{FromRequest, Guard};
+/// # use hyperdrive::{BoxedError, NoContext};
+///
+/// struct User {
+///     id: u32,
+///     // ...
+/// }
+///
+/// impl Guard for User {
+///     // (omitted for brevity)
+/// #     type Context = NoContext;
+/// #     type Result = Result<Self, BoxedError>;
+/// #     fn from_request(_: &http::Request<()>, _: &NoContext) -> Result<Self, BoxedError> {
+/// #         User { id: 0 }.id;
+/// #         Ok(User { id: 0 })
+/// #     }
+/// }
+///
+/// #[derive(FromRequest)]
+/// enum Route {
+///     #[get("/login")]
+///     LoginForm,
+///
+///     #[get("/staff")]
+///     Staff {
+///         // Require a logged-in user to make this request
+///         user: User,
+///     },
+/// }
+/// ```
 ///
 /// ## Forwarding
 ///
