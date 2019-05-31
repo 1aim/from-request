@@ -118,10 +118,6 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
 
     // Ensure that there's at least 1 way for us to instantiate the type
     if !variant_data.iter().any(|v| v.constructible()) {
-        // Not a single route attribute in the entire item. This situation would lead to "cannot
-        // infer type for `T`" errors.
-        // FIXME: This should not be happening, we *want* to be able to create structs without a
-        // route attr.
         let what = if is_struct {
             "struct"
         } else {
@@ -512,7 +508,10 @@ fn generate_trait_bounds(item: &ItemData, variants: &[VariantData]) -> Bounds {
     // Creates a unique type parameter containing the given name, and adds it to the returned
     // `Bounds`
     let mut mkty = |name| -> Ident {
-        let ident = Ident::new(&format!("_hyperdrive_{}_{}", name, ty_param_counter), Span::call_site());
+        let ident = Ident::new(
+            &format!("_hyperdrive_{}_{}", name, ty_param_counter),
+            Span::call_site(),
+        );
         ty_param_counter += 1;
         ty_params.push(ident.clone());
         ident
