@@ -79,7 +79,7 @@ fn main() {
 
     let port = srv.local_addr().port();
 
-    let handle = std::thread::spawn(move || tokio::run(srv.map_err(|e| {
+    std::thread::spawn(move || tokio::run(srv.map_err(|e| {
         panic!("unexpected error: {}", e);
     })));
 
