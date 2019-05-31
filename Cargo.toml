@@ -58,8 +58,3 @@ replace = 'hyperdrive = "{{version}}"'
 file    = "src/lib.rs"
 search  = "https://docs.rs/hyperdrive/[a-z0-9\\.-]+"
 replace = "https://docs.rs/hyperdrive/{{version}}"
-
-[[package.metadata.release.pre-release-replacements]]
-file    = "Cargo.toml"
-search  = "[a-z0-9\\.-]+\""
-replace = "{{version}}\""
