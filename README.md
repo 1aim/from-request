@@ -23,8 +23,8 @@ user-provided sync handler:
 
 ```rust
 use hyperdrive::{FromRequest, body::Json, service::SyncService};
-use hyper::{Server, Body, Client};
-use http::{Response, Request, StatusCode};
+use hyper::{Server, Body};
+use http::{Response, StatusCode};
 use futures::prelude::*;
 use serde::Deserialize;
 
@@ -77,20 +77,20 @@ fn main() {
             }
         }));
 
-    // Let's make a login request to it
     let port = srv.local_addr().port();
-    let request = Client::new().request(
-        Request::builder()
-            .uri(format!("http://127.0.0.1:{}/login", port))
-            .body(Body::from(r#"{ "email": "oof@example.com", password: "hunter2" }"#))
-            .expect("failed to build request")
-    ).map(|response| {
-        // The login should succeed
-        assert_eq!(response.status(), StatusCode::OK);
-    });
 
-    tokio::run(srv.with_graceful_shutdown(request).map_err(|e| {
+    let handle = std::thread::spawn(move || tokio::run(srv.map_err(|e| {
         panic!("unexpected error: {}", e);
-    }));
+    })));
+
+    // Let's make a login request to it
+    let response = reqwest::Client::new()
+        .post(&format!("http://127.0.0.1:{}/login", port))
+        .body(r#"{ "email": "oof@example.com", "password": "hunter2" }"#)
+        .send()
+        .unwrap();
+
+    // This login request should succeed
+    assert_eq!(response.status(), StatusCode::OK);
 }
 ```
