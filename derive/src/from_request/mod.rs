@@ -274,7 +274,7 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
                             (Some(#i), _) => {
                                 // FIXME `find_accepted_methods` needs access to `request.uri()`
                                 // in the `map_err`. Clean things up so we don't need this.
-                                let mut tmp_request = Request::new(());
+                                let mut tmp_request = http::Request::new(());
                                 *tmp_request.uri_mut() = request.uri().clone();
 
                                 let future = #construct;
