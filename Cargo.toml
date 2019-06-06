@@ -51,7 +51,7 @@ serde_urlencoded = "0.5.4"
 
 [dependencies.hyperderive]
 path = "derive"
-version = "=0.0.1"
+version = "=0.0.2"
 
 [dev-dependencies]
 version-sync = "0.8"
