@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+No changes.
+
+## 0.1.1 - 2019-06-06
+
 * Fix an issue where `Request::new` was being used unqualified in the generated
   code ([#17](https://github.com/1aim/hyperdrive/issues/17))
 

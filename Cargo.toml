@@ -1,6 +1,6 @@
 [package]
 name = "hyperdrive"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Jonas Schievink <jonasschievink@gmail.com>"]
 description = "Declarative request routing and decoding with async support"
 documentation = "https://docs.rs/hyperdrive/"

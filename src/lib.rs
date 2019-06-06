@@ -146,7 +146,7 @@ TODO:
 // Deny certain warnings inside doc tests / examples. When this isn't present, rustdoc doesn't show
 // *any* warnings at all.
 #![doc(test(attr(deny(unused_imports, unused_must_use))))]
-#![doc(html_root_url = "https://docs.rs/hyperdrive/0.1.0")]
+#![doc(html_root_url = "https://docs.rs/hyperdrive/0.1.1")]
 #![warn(missing_debug_implementations)]
 #![warn(missing_docs)]
 #![warn(rust_2018_idioms)]
