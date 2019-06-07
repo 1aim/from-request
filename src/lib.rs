@@ -530,11 +530,21 @@ pub trait FromRequest: Sized {
     ///
     /// This consumes the request *and* the context.
     ///
+    /// Implementations of this function must not block, since this function is
+    /// always run on a futures executor. If you need to perform blocking I/O or
+    /// long-running computations, you can call [`tokio_threadpool::blocking`].
+    ///
+    /// A blocking wrapper around this method is provided by
+    /// [`from_request_sync`].
+    ///
     /// # Parameters
     ///
     /// * **`request`**: An HTTP request from the `http` crate, containing a
     ///   `hyper::Body`.
     /// * **`context`**: User-defined context.
+    ///
+    /// [`from_request_sync`]: #method.from_request_sync
+    /// [`tokio_threadpool::blocking`]: ../tokio_threadpool/fn.blocking.html
     fn from_request(request: http::Request<hyper::Body>, context: Self::Context) -> Self::Future;
 
     /// Create a `Self` from an HTTP request, synchronously.
@@ -542,6 +552,11 @@ pub trait FromRequest: Sized {
     /// This is a blocking version of [`from_request`]. The provided default
     /// implementation will internally create a single-threaded tokio runtime to
     /// perform the conversion and receive the request body.
+    ///
+    /// Note that this does not provide a way to *write* a blocking version of
+    /// [`from_request`]. Implementors of this trait must always implement
+    /// [`from_request`] in a non-blocking fashion, even if they *also*
+    /// implement this method.
     ///
     /// [`from_request`]: #tymethod.from_request
     fn from_request_sync(
@@ -645,11 +660,15 @@ pub trait Guard: Sized {
     /// [`DefaultFuture`]: type.DefaultFuture.html
     type Result: IntoFuture<Item = Self, Error = BoxedError>;
 
-    /// Create a `Self` from HTTP request data.
+    /// Create an instance of this type from HTTP request data, asynchronously.
     ///
     /// This can inspect HTTP headers and other data provided by
     /// [`http::Request`], but can not access the body of the request. If access
     /// to the body is needed, [`FromBody`] must be implemented instead.
+    ///
+    /// Implementations of this function must not block, since this function is
+    /// always run on a futures executor. If you need to perform blocking I/O or
+    /// long-running computations, you can call [`tokio_threadpool::blocking`].
     ///
     /// # Parameters
     ///
@@ -658,6 +677,7 @@ pub trait Guard: Sized {
     ///
     /// [`http::Request`]: ../http/request/struct.Request.html
     /// [`FromBody`]: trait.FromBody.html
+    /// [`tokio_threadpool::blocking`]: ../tokio_threadpool/fn.blocking.html
     fn from_request(request: &http::Request<()>, context: &Self::Context) -> Self::Result;
 }
 
@@ -756,10 +776,15 @@ pub trait FromBody: Sized {
     /// [`from_body`]: #tymethod.from_body
     type Result: IntoFuture<Item = Self, Error = BoxedError>;
 
-    /// Create a `Self` from an HTTP request body.
+    /// Create an instance of this type from an HTTP request body,
+    /// asynchronously.
     ///
     /// This will consume the body, so only one `FromBody` type can be used for
     /// every processed request.
+    ///
+    /// Implementations of this function must not block, since this function is
+    /// always run on a futures executor. If you need to perform blocking I/O or
+    /// long-running computations, you can call [`tokio_threadpool::blocking`].
     ///
     /// **Note**: You probably want to limit the size of the body to prevent
     /// denial of service attacks.
@@ -771,6 +796,7 @@ pub trait FromBody: Sized {
     /// * **`context`**: User-defined context.
     ///
     /// [`Guard`]: trait.Guard.html
+    /// [`tokio_threadpool::blocking`]: ../tokio_threadpool/fn.blocking.html
     fn from_body(
         request: &http::Request<()>,
         body: hyper::Body,
