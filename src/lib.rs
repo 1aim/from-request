@@ -166,9 +166,9 @@ pub use {futures, http, hyper, serde};
 #[doc(hidden)]
 pub use {lazy_static::lazy_static, regex};
 
+use doc_comment::doctest;
 use futures::{Future, IntoFuture};
 use tokio::runtime::current_thread::Runtime;
-use doc_comment::doctest;
 
 doctest!("../README.md");
 
@@ -872,4 +872,38 @@ impl AsRef<NoContext> for NoContext {
     fn as_ref(&self) -> &Self {
         &NoContext
     }
+}
+
+/// Turns a blocking closure into an asynchronous `Future`.
+///
+/// This function takes a blocking closure that does synchronous I/O or heavy
+/// computations, and turns it into a well-behaved asynchronous `Future` by
+/// running it on a thread pool.
+///
+/// The returned future will have `'static` lifetime if the passed closure and
+/// the success and error types do.
+///
+/// This is a convenience wrapper around [`tokio_threadpool::blocking`].
+///
+/// [`tokio_threadpool::blocking`]: ../tokio_threadpool/fn.blocking.html
+pub fn blocking<F, T, E>(f: F) -> impl Future<Item = T, Error = E>
+where
+    F: FnOnce() -> Result<T, E>,
+{
+    // Needs a small `Option` dance because `poll_fn` takes an `FnMut`
+    let mut f = Some(f);
+
+    futures::future::poll_fn(move || {
+        tokio_threadpool::blocking(|| f.take().unwrap()()).map_err(|blocking_err| {
+            // `blocking` only returns errors in critical situations:
+            // - when the threadpool has already shut down
+            // - when tokio isn't running
+            // This wrapper just panics in that situation.
+            panic!(
+                "`tokio_threadpool::blocking` returned error: {}",
+                blocking_err
+            );
+        })
+    })
+    .and_then(|result| result)
 }

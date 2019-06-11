@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-No changes.
+* Add a `hyperdrive::blocking` helper function to simplify sync/async interop.
 
 ## 0.1.1 - 2019-06-06
 

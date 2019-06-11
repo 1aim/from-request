@@ -381,13 +381,8 @@ where
         let handler = self.handler.clone();
         let fut = R::from_request(req, self.context.clone())
             .and_then(move |req| {
-                // Run the handler on the blocking thread pool. The `blocking` call might fail and
-                // is retried when the pool is currently full, so we do a little `Option` dance.
-                let mut req = Some(req);
-                futures::future::poll_fn(move || {
-                    tokio_threadpool::blocking(|| handler(req.take().unwrap()))
-                })
-                .map_err(|e| BoxedError::from(e))
+                // Run the sync handler on the blocking thread pool.
+                crate::blocking(move || Ok(handler(req)))
             })
             .map(move |response| {
                 if is_head {
