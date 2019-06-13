@@ -168,6 +168,7 @@ pub use {lazy_static::lazy_static, regex};
 
 use doc_comment::doctest;
 use futures::{Future, IntoFuture};
+use std::sync::Arc;
 use tokio::runtime::current_thread::Runtime;
 
 doctest!("../README.md");
@@ -392,6 +393,7 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// ```
 /// use hyperdrive::{FromRequest, Guard};
 /// # use hyperdrive::{BoxedError, NoContext};
+/// # use std::sync::Arc;
 ///
 /// struct User {
 ///     id: u32,
@@ -402,7 +404,7 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 ///     // (omitted for brevity)
 /// #     type Context = NoContext;
 /// #     type Result = Result<Self, BoxedError>;
-/// #     fn from_request(_: &http::Request<()>, _: &NoContext) -> Result<Self, BoxedError> {
+/// #     fn from_request(_: &Arc<http::Request<()>>, _: &NoContext) -> Result<Self, BoxedError> {
 /// #         User { id: 0 }.id;
 /// #         Ok(User { id: 0 })
 /// #     }
@@ -444,13 +446,14 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// ```
 /// use hyperdrive::{FromRequest, Guard};
 /// # use hyperdrive::{NoContext, BoxedError};
+/// # use std::sync::Arc;
 ///
 /// struct User;
 /// impl Guard for User {
 ///     // (omitted for brevity)
 /// #     type Context = NoContext;
 /// #     type Result = Result<Self, BoxedError>;
-/// #     fn from_request(_: &http::Request<()>, _: &NoContext) -> Result<Self, BoxedError> {
+/// #     fn from_request(_: &Arc<http::Request<()>>, _: &NoContext) -> Result<Self, BoxedError> {
 /// #         Ok(User)
 /// #     }
 /// }
@@ -583,13 +586,14 @@ pub trait FromRequest: Sized {
 ///
 /// ```
 /// # use hyperdrive::{Guard, NoContext, BoxedError};
+/// # use std::sync::Arc;
 /// struct MustFrobnicate;
 ///
 /// impl Guard for MustFrobnicate {
 ///     type Context = NoContext;
 ///     type Result = Result<Self, BoxedError>;
 ///
-///     fn from_request(request: &http::Request<()>, context: &Self::Context) -> Self::Result {
+///     fn from_request(request: &Arc<http::Request<()>>, context: &Self::Context) -> Self::Result {
 ///         if request.headers().contains_key("X-Frobnicate") {
 ///             Ok(MustFrobnicate)
 ///         } else {
@@ -605,6 +609,7 @@ pub trait FromRequest: Sized {
 ///
 /// ```
 /// # use hyperdrive::{Guard, RequestContext, BoxedError};
+/// # use std::sync::Arc;
 /// #[derive(RequestContext)]
 /// struct ForbiddenAgents {
 ///     agents: Vec<String>,
@@ -616,7 +621,7 @@ pub trait FromRequest: Sized {
 ///     type Context = ForbiddenAgents;
 ///     type Result = Result<Self, BoxedError>;
 ///
-///     fn from_request(request: &http::Request<()>, context: &Self::Context) -> Self::Result {
+///     fn from_request(request: &Arc<http::Request<()>>, context: &Self::Context) -> Self::Result {
 ///         let agent = request.headers().get("User-Agent")
 ///             .ok_or_else(|| String::from("No User-Agent header"))?;
 ///
@@ -678,7 +683,7 @@ pub trait Guard: Sized {
     /// [`http::Request`]: ../http/request/struct.Request.html
     /// [`FromBody`]: trait.FromBody.html
     /// [`tokio_threadpool::blocking`]: ../tokio_threadpool/fn.blocking.html
-    fn from_request(request: &http::Request<()>, context: &Self::Context) -> Self::Result;
+    fn from_request(request: &Arc<http::Request<()>>, context: &Self::Context) -> Self::Result;
 }
 
 /// Asynchronous conversion from an HTTP request body.
@@ -695,6 +700,7 @@ pub trait Guard: Sized {
 /// # use hyperdrive::{FromBody, NoContext, DefaultFuture, BoxedError};
 /// # use futures::prelude::*;
 /// # use serde_json as serde_whatever;
+/// # use std::sync::Arc;
 /// struct CustomFormat<T>(T);
 ///
 /// impl<T: serde::de::DeserializeOwned + Send + 'static> FromBody for CustomFormat<T> {
@@ -702,7 +708,7 @@ pub trait Guard: Sized {
 ///     type Result = DefaultFuture<Self, BoxedError>;
 ///
 ///     fn from_body(
-///         request: &http::Request<()>,
+///         request: &Arc<http::Request<()>>,
 ///         body: hyper::Body,
 ///         context: &Self::Context,
 ///     ) -> Self::Result {
@@ -722,6 +728,7 @@ pub trait Guard: Sized {
 /// ```
 /// # use hyperdrive::{FromBody, NoContext, DefaultFuture, BoxedError};
 /// # use futures::prelude::*;
+/// # use std::sync::Arc;
 /// struct BodyChecksum(u8);
 ///
 /// impl FromBody for BodyChecksum {
@@ -729,7 +736,7 @@ pub trait Guard: Sized {
 ///     type Result = DefaultFuture<Self, BoxedError>;
 ///
 ///     fn from_body(
-///         request: &http::Request<()>,
+///         request: &Arc<http::Request<()>>,
 ///         body: hyper::Body,
 ///         context: &Self::Context,
 ///     ) -> Self::Result {
@@ -798,7 +805,7 @@ pub trait FromBody: Sized {
     /// [`Guard`]: trait.Guard.html
     /// [`tokio_threadpool::blocking`]: ../tokio_threadpool/fn.blocking.html
     fn from_body(
-        request: &http::Request<()>,
+        request: &Arc<http::Request<()>>,
         body: hyper::Body,
         context: &Self::Context,
     ) -> Self::Result;
@@ -906,4 +913,33 @@ where
         })
     })
     .and_then(|result| result)
+}
+
+/// Splits the `Parts` out of an `Arc<http::Request<()>>`.
+///
+/// The generated code calls this when a `#[forward]` field need to be created from its
+/// `FromRequest` impl. In the common case, the `Arc` passed in is the only one, so we can move out
+/// of it directly. However, users might also clone it and keep it alive, in which case we have to
+/// do more work.
+#[doc(hidden)] // only for use by the generated code; unstable API
+#[inline]
+pub fn split_request(request: Arc<http::Request<()>>) -> http::request::Parts {
+    match Arc::try_unwrap(request) {
+        Ok(request) => request.into_parts().0,
+        Err(arc) => {
+            // There are still outstanding `Arc`s. This should rarely happen, since the code will
+            // usually wait until futures are resolved (and thus dropped). There could still be
+            // `Arc`s around though (eg. by storing one in a `Guard`).
+            // This means we have to clone the request. It can't implement `Clone` because of the
+            // extensions mechanism (which is basically a `TypeMap`), so we have to do it by hand.
+            // We leave the extension map empty, and also clear it immediately in the generated
+            // `FromRequest` impl so that it's consistently empty.
+            let mut request = http::Request::new(());
+            *request.method_mut() = arc.method().clone();
+            *request.uri_mut() = arc.uri().clone();
+            *request.version_mut() = arc.version();
+            *request.headers_mut() = arc.headers().clone();
+            request.into_parts().0
+        }
+    }
 }

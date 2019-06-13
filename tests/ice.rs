@@ -1,5 +1,6 @@
-use hyperdrive::*;
 use http::Request;
+use hyperdrive::*;
+use std::sync::Arc;
 
 struct MyGuard;
 
@@ -8,7 +9,7 @@ impl Guard for MyGuard {
 
     type Result = Result<Self, BoxedError>;
 
-    fn from_request(_request: &Request<()>, _context: &Self::Context) -> Self::Result {
+    fn from_request(_request: &Arc<Request<()>>, _context: &Self::Context) -> Self::Result {
         Ok(MyGuard)
     }
 }

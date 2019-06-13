@@ -6,6 +6,7 @@ use hyperdrive::{
 };
 use serde::Deserialize;
 use std::str::FromStr;
+use std::sync::Arc;
 
 /// Simulates receiving `request`, and decodes a `FromRequest` implementor `T`.
 ///
@@ -32,7 +33,7 @@ impl Guard for MyGuard {
 
     type Result = Result<Self, BoxedError>;
 
-    fn from_request(_request: &http::Request<()>, _context: &Self::Context) -> Self::Result {
+    fn from_request(_request: &Arc<http::Request<()>>, _context: &Self::Context) -> Self::Result {
         Ok(MyGuard)
     }
 }
@@ -161,7 +162,10 @@ fn context() {
 
         type Result = Result<Self, BoxedError>;
 
-        fn from_request(_request: &http::Request<()>, _context: &Self::Context) -> Self::Result {
+        fn from_request(
+            _request: &Arc<http::Request<()>>,
+            _context: &Self::Context,
+        ) -> Self::Result {
             Ok(SpecialGuard)
         }
     }
@@ -201,7 +205,10 @@ fn struct_context() {
 
         type Result = Result<Self, BoxedError>;
 
-        fn from_request(_request: &http::Request<()>, _context: &Self::Context) -> Self::Result {
+        fn from_request(
+            _request: &Arc<http::Request<()>>,
+            _context: &Self::Context,
+        ) -> Self::Result {
             Ok(SpecialGuard)
         }
     }
@@ -421,7 +428,7 @@ fn generic() {
         type Context = SpecialContext;
         type Result = Result<Self, BoxedError>;
 
-        fn from_request(_request: &Request<()>, _context: &Self::Context) -> Self::Result {
+        fn from_request(_request: &Arc<Request<()>>, _context: &Self::Context) -> Self::Result {
             Ok(SpecialGuard)
         }
     }
@@ -774,4 +781,44 @@ fn generic_guard_struct_2() {
             .downcast()
             .unwrap();
     assert_eq!(err.kind(), ErrorKind::WrongMethod);
+}
+
+/// Keeps another `Arc` around pointing to the request, while the `#[forward]`ed `from_request` is
+/// invoked.
+///
+/// This will invoke the slow-path that manually clones the request, since `Arc::try_unwrap` will
+/// now fail.
+#[test]
+fn klepto_arc() {
+    struct MyGuard {
+        request: Arc<http::Request<()>>,
+    }
+
+    impl Guard for MyGuard {
+        type Context = NoContext;
+        type Result = Result<Self, BoxedError>;
+
+        fn from_request(request: &Arc<http::Request<()>>, _: &Self::Context) -> Self::Result {
+            Ok(MyGuard {
+                request: Arc::clone(request),
+            })
+        }
+    }
+
+    #[derive(FromRequest)]
+    #[get("/")]
+    struct Route {
+        guard: MyGuard,
+
+        #[forward]
+        _inner: Inner,
+    }
+
+    #[derive(FromRequest)]
+    #[get("/")]
+    struct Inner {}
+
+    let route: Route = invoke(Request::get("/").body(Body::empty()).unwrap()).unwrap();
+    assert_eq!(route.guard.request.uri(), "/");
+    assert_eq!(route.guard.request.method(), "GET");
 }

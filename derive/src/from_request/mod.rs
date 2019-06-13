@@ -420,15 +420,20 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
         // Otherwise the calling crate could override this.
         use core::convert::AsRef;
         use core::str::FromStr;
+        use std::sync::Arc;
 
         gen impl<#(#impl_generics),*> FromRequest for @Self #where_clause {
             type Future = DefaultFuture<Self, BoxedError>;
             type Context = #context;
 
             fn from_request(
-                request: http::Request<hyper::Body>,
+                mut request: http::Request<hyper::Body>,
                 context: Self::Context,
             ) -> Self::Future {
+                // We cannot support extensions right now, because they can't be cloned. Make sure
+                // to consistently clear them.
+                request.extensions_mut().clear();
+
                 // Step 0: `Variant` has all variants of the input enum that have a route attribute
                 // but without any data.
                 enum Variant {
@@ -763,9 +768,9 @@ fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStre
         let var = Ident::new(&format!("fld_{}", forward), Span::call_site());
         future = quote! {{
             // When we get here, the incoming request was split into `body` (type `Body`) and
-            // `headers` (type `Request<()>`), so we need to recombine them. It's okay to consume
-            // both, since this is the last processing step in the chain.
-            let request = http::Request::from_parts(headers.into_parts().0, body);
+            // `headers` (type `Arc<Request<()>>`), so we need to recombine them.
+            let parts = hyperdrive::split_request(headers);
+            let request = http::Request::from_parts(parts, body);
 
             // FIXME: we move the context as-is because `FromRequest` consumes it. we should be
             // using AsRef
@@ -802,7 +807,7 @@ fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStre
         // Before the async operations, split the incoming `Request<Body>` into
         // the headers (etc.) as a `Request<()>` and the `Body` itself.
         let (parts, body) = request.into_parts();
-        let headers = http::Request::from_parts(parts, ());
+        let headers = Arc::new(http::Request::from_parts(parts, ()));
 
         let future = #future;
 

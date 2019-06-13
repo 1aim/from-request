@@ -18,6 +18,7 @@ use crate::{BoxedError, DefaultFuture, FromBody, NoContext};
 use futures::{Future, Stream};
 use serde::de::DeserializeOwned;
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 macro_rules! deref {
     ($t:ty) => {
@@ -99,7 +100,7 @@ impl<T: DeserializeOwned + Send + 'static> FromBody for HtmlForm<T> {
     type Result = DefaultFuture<Self, BoxedError>;
 
     fn from_body(
-        _request: &http::Request<()>,
+        _request: &Arc<http::Request<()>>,
         body: hyper::Body,
         _context: &Self::Context,
     ) -> Self::Result {
@@ -173,7 +174,7 @@ impl<T: DeserializeOwned + Send + 'static> FromBody for Json<T> {
     type Result = DefaultFuture<Self, BoxedError>;
 
     fn from_body(
-        _request: &http::Request<()>,
+        _request: &Arc<http::Request<()>>,
         body: hyper::Body,
         _context: &Self::Context,
     ) -> Self::Result {

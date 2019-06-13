@@ -17,7 +17,7 @@ enum Outer {
     Fallback {
         #[forward]
         inner: Inner,
-    }
+    },
 }
 
 #[derive(FromRequest)]
