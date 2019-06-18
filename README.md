@@ -56,7 +56,7 @@ fn main() {
     // Prepare a hyper server using Hyperdrive's `SyncService` adapter.
     // If you want to write an async handler, you could use `AsyncService` instead.
     let srv = Server::bind(&"127.0.0.1:0".parse().unwrap())
-        .serve(SyncService::new(|route: Route| {
+        .serve(SyncService::new(|route: Route, _| {
             match route {
                 Route::Index => {
                     Response::new(Body::from("Hello World!"))

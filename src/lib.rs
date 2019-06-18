@@ -36,7 +36,7 @@
 //! }
 //!
 //! let srv = Server::bind(&"127.0.0.1:0".parse().unwrap())
-//!     .serve(AsyncService::new(|route: Route| {
+//!     .serve(AsyncService::new(|route: Route, _| {
 //!         match route {
 //!             Route::Index => {
 //!                 Ok(Response::new(Body::from("Hello World!"))).into_future()
@@ -66,7 +66,7 @@
 //! }
 //!
 //! let srv = Server::bind(&"127.0.0.1:0".parse().unwrap())
-//!     .serve(SyncService::new(|route: Route| {
+//!     .serve(SyncService::new(|route: Route, _| {
 //!         // This closure can block freely, and has to return a `Response<Body>`
 //!         match route {
 //!             Route::Index => {
