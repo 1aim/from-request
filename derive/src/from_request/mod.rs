@@ -426,14 +426,11 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
             type Future = DefaultFuture<Self, BoxedError>;
             type Context = #context;
 
-            fn from_request(
-                mut request: http::Request<hyper::Body>,
+            fn from_request_and_body(
+                request: &Arc<http::Request<()>>,
+                body: hyper::Body,
                 context: Self::Context,
             ) -> Self::Future {
-                // We cannot support extensions right now, because they can't be cloned. Make sure
-                // to consistently clear them.
-                request.extensions_mut().clear();
-
                 // Step 0: `Variant` has all variants of the input enum that have a route attribute
                 // but without any data.
                 enum Variant {
@@ -756,7 +753,7 @@ fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStre
         let ty = &field_by_name(body).ty;
         let var = Ident::new(&format!("fld_{}", body), Span::call_site());
         future = quote! {
-            <#ty as FromBody>::from_body(&headers, body, context.as_ref())
+            <#ty as FromBody>::from_body(&request, body, context.as_ref())
                 .into_future()
                 .and_then(move |#var| #future)
         };
@@ -767,14 +764,7 @@ fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStre
         let ty = &field_by_name(forward).ty;
         let var = Ident::new(&format!("fld_{}", forward), Span::call_site());
         future = quote! {{
-            // When we get here, the incoming request was split into `body` (type `Body`) and
-            // `headers` (type `Arc<Request<()>>`), so we need to recombine them.
-            let parts = hyperdrive::split_request(headers);
-            let request = http::Request::from_parts(parts, body);
-
-            // FIXME: we move the context as-is because `FromRequest` consumes it. we should be
-            // using AsRef
-            <#ty as FromRequest>::from_request(request, context)
+            <#ty as FromRequest>::from_request_and_body(&request, body, context)
                 .into_future()
                 .and_then(move |#var| #future)
         }};
@@ -791,7 +781,7 @@ fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStre
         let ty = &field_by_name(&guard).ty;
         let var = Ident::new(&format!("fld_{}", guard), Span::call_site());
         future = quote! {
-            <#ty as Guard>::from_request(&headers, context.as_ref())
+            <#ty as Guard>::from_request(&request, context.as_ref())
                 .into_future()
                 .and_then(move |#var| #future)
         };
@@ -804,11 +794,7 @@ fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStre
 
         #query
 
-        // Before the async operations, split the incoming `Request<Body>` into
-        // the headers (etc.) as a `Request<()>` and the `Body` itself.
-        let (parts, body) = request.into_parts();
-        let headers = Arc::new(http::Request::from_parts(parts, ()));
-
+        let request = Arc::clone(request);
         let future = #future;
 
         Box::new(future) as DefaultFuture<Self, BoxedError>

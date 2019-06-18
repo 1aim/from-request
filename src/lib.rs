@@ -529,6 +529,28 @@ pub trait FromRequest: Sized {
     /// [`from_request`]: #tymethod.from_request
     type Future: Future<Item = Self, Error = BoxedError> + Send;
 
+    /// Creates a `Self` from an HTTP request, asynchronously.
+    ///
+    /// This takes the request metadata, body, and a user-defined context. Only
+    /// the body is consumed.
+    ///
+    /// Implementations of this function must not block, since this function is
+    /// always run on a futures executor. If you need to perform blocking I/O or
+    /// long-running computations, you can call [`tokio_threadpool::blocking`].
+    ///
+    /// # Parameters
+    ///
+    /// * **`request`**: HTTP request data (headers, path, method, etc.).
+    /// * **`body`**: The streamed HTTP body.
+    /// * **`context`**: The user-defined context.
+    ///
+    /// [`tokio_threadpool::blocking`]: ../tokio_threadpool/fn.blocking.html
+    fn from_request_and_body(
+        request: &Arc<http::Request<()>>,
+        body: hyper::Body,
+        context: Self::Context,
+    ) -> Self::Future;
+
     /// Create a `Self` from an HTTP request, asynchronously.
     ///
     /// This consumes the request *and* the context.
@@ -548,7 +570,12 @@ pub trait FromRequest: Sized {
     ///
     /// [`from_request_sync`]: #method.from_request_sync
     /// [`tokio_threadpool::blocking`]: ../tokio_threadpool/fn.blocking.html
-    fn from_request(request: http::Request<hyper::Body>, context: Self::Context) -> Self::Future;
+    fn from_request(request: http::Request<hyper::Body>, context: Self::Context) -> Self::Future {
+        let (parts, body) = request.into_parts();
+        let request = Arc::new(http::Request::from_parts(parts, ()));
+
+        Self::from_request_and_body(&request, body, context)
+    }
 
     /// Create a `Self` from an HTTP request, synchronously.
     ///
@@ -913,33 +940,4 @@ where
         })
     })
     .and_then(|result| result)
-}
-
-/// Splits the `Parts` out of an `Arc<http::Request<()>>`.
-///
-/// The generated code calls this when a `#[forward]` field need to be created from its
-/// `FromRequest` impl. In the common case, the `Arc` passed in is the only one, so we can move out
-/// of it directly. However, users might also clone it and keep it alive, in which case we have to
-/// do more work.
-#[doc(hidden)] // only for use by the generated code; unstable API
-#[inline]
-pub fn split_request(request: Arc<http::Request<()>>) -> http::request::Parts {
-    match Arc::try_unwrap(request) {
-        Ok(request) => request.into_parts().0,
-        Err(arc) => {
-            // There are still outstanding `Arc`s. This should rarely happen, since the code will
-            // usually wait until futures are resolved (and thus dropped). There could still be
-            // `Arc`s around though (eg. by storing one in a `Guard`).
-            // This means we have to clone the request. It can't implement `Clone` because of the
-            // extensions mechanism (which is basically a `TypeMap`), so we have to do it by hand.
-            // We leave the extension map empty, and also clear it immediately in the generated
-            // `FromRequest` impl so that it's consistently empty.
-            let mut request = http::Request::new(());
-            *request.method_mut() = arc.method().clone();
-            *request.uri_mut() = arc.uri().clone();
-            *request.version_mut() = arc.version();
-            *request.headers_mut() = arc.headers().clone();
-            request.into_parts().0
-        }
-    }
 }
