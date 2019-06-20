@@ -12,8 +12,11 @@
 
 * Add a `hyperdrive::blocking` helper function to simplify sync/async interop.
 * Pass the request as a `&Arc<Request<_>>` ([#19]).
+* The original request is now passed to the service closure when using
+  `SyncService` or `AsyncService` ([#20]).
 
 [#19]: https://github.com/1aim/hyperdrive/issues/19
+[#20]: https://github.com/dac-gmbh/hyperdrive/issues/20
 
 ## 0.1.1 - 2019-06-06
 
