@@ -36,9 +36,9 @@ use std::sync::Arc;
 ///
 /// # Type Parameters
 ///
-/// * **`H`**: The handler closure. Takes a [`FromRequest`] implementor `R` and
-///   returns a future resolving to the response to return to the client. Shared
-///   via `Arc`.
+/// * **`H`**: The handler closure. Takes a [`FromRequest`] implementor `R`, and
+///   the original request. Returns a future resolving to the response to return
+///   to the client. Shared via `Arc`.
 /// * **`R`**: The request type expected by the handler `H`. Implements
 ///   `FromRequest`.
 /// * **`F`**: The `Future` returned by the handler closure `H`.
@@ -47,8 +47,9 @@ use std::sync::Arc;
 ///
 /// ```
 /// use hyperdrive::{FromRequest, service::AsyncService};
-/// use hyper::{Server, Response, Body};
+/// use hyper::{Server, Response, Request, Body};
 /// use futures::prelude::*;
+/// use std::sync::Arc;
 ///
 /// #[derive(FromRequest)]
 /// enum Route {
@@ -56,9 +57,10 @@ use std::sync::Arc;
 ///     Index,
 /// }
 ///
-/// let service = AsyncService::new(|route: Route, _| {
+/// let service = AsyncService::new(|route: Route, orig: Arc<Request<()>>| {
 ///     // The closure is called with the `FromRequest`-implementing type and
-///     // has to return any type implementing `Future`.
+///     // the original request. It has to return any type implementing
+///     // `Future`.
 ///     match route {
 ///         Route::Index => {
 ///             Ok(Response::new(Body::from("Hello World!"))).into_future()
@@ -257,14 +259,16 @@ where
 /// # Type Parameters
 ///
 /// * **`H`**: The handler closure. It is called with the request type `R` and
-///   has to return the `Response<Body>` to send to the client.
+///   the original request. It has to return the `Response<Body>` to send to the
+///   client.
 /// * **`R`**: The request type implementing `FromRequest`.
 ///
 /// # Examples
 ///
 /// ```
 /// use hyperdrive::{FromRequest, service::SyncService};
-/// use hyper::{Response, Body, Server};
+/// use hyper::{Request, Response, Body, Server};
+/// use std::sync::Arc;
 ///
 /// #[derive(FromRequest)]
 /// enum Route {
@@ -272,7 +276,7 @@ where
 ///     Index,
 /// }
 ///
-/// let service = SyncService::new(|route: Route, _| {
+/// let service = SyncService::new(|route: Route, orig: Arc<Request<()>>| {
 ///     match route {
 ///         Route::Index => Response::new(Body::from("Hello world!")),
 ///     }
