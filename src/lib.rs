@@ -232,15 +232,23 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// JSON body.
 ///
 /// The generated `FromRequest` implementation will always use
-/// [`DefaultFuture<Self, BoxedError>`][`DefaultFuture`] as the associated
-/// `Result` type.
+/// [`DefaultFuture<Self, Self::Error>`][`DefaultFuture`] as the associated
+/// `Result` type and [`NoCustomError`] as `Error` type.
+///
+/// **Be aware that any custom error is a `hyper::Service` error and as such
+/// isn't handled by hyper by dropping the connection. To have custom error
+/// handling you have to wrap the created `hyper::Service` (e.g. wrap the
+/// result of [`SyncService::new`]**
 ///
 /// Note that the generated implementation will make use of `.and_then()` to
 /// chain asynchronous operations instead of running them in parallel using
 /// `join_all`. This is because it simplifies the code and doesn't require
 /// making use of boxed futures everywhere in the generated code. Multiple
 /// requests will still be handled in parallel, so this should not negatively
-/// affect performance.
+/// affect performance. Note that the only operations which could be executed
+/// in parallel are the creations of all `Guard` instances (and maybe the
+/// `FromBody` instance). So for many routes this is a irrelevant implementation
+/// detail.
 ///
 /// In order to keep the implementation simple and user code more easily
 /// understandable, overlapping paths are not allowed (unless the paths are
@@ -502,6 +510,7 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 ///
 /// [`AsyncService`]: service/struct.AsyncService.html
 /// [`SyncService`]: service/struct.SyncService.html
+/// [`SyncService::new`]: service/struct.SyncService.html#method.new
 /// [`FromBody`]: trait.FromBody.html
 /// [`RequestContext`]: trait.RequestContext.html
 /// [`Guard`]: trait.Guard.html
@@ -509,6 +518,7 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// [`DefaultFuture`]: type.DefaultFuture.html
 /// [`body`]: body/index.html
 /// [`from_request`]: #tymethod.from_request
+/// [`NoCustomError`]: type.NoCustomError.html
 pub trait FromRequest: Sized {
     /// A context parameter passed to [`from_request`].
     ///
@@ -561,7 +571,7 @@ pub trait FromRequest: Sized {
     /// Because `impl Trait` cannot be used inside traits (and named
     /// existential types aren't yet stable), the type here might not be
     /// nameable. In that case, you can set it to
-    /// [`DefaultFuture<Self, BoxedError>`][`DefaultFuture`] and box the
+    /// [`DefaultFuture<Self, Self::Error>`][`DefaultFuture`] and box the
     /// returned future.
     ///
     /// [`DefaultFuture`]: type.DefaultFuture.html
@@ -731,6 +741,14 @@ pub trait Guard: Sized {
     ///
     /// `Error: std::error::Error + Send + Sync + 'static`
     ///
+    /// Be aware that custom guard errors are turned into custom `FromRequest`
+    /// errors, which are returned as hyper `Service` errors. Which might not
+    /// be handled in the way you expect (See [`FromRequest::Error`]'s
+    /// documentation for more details).
+    ///
+    /// If you do not need a custom error type use [`NoCustomError`].
+    ///
+    /// [`NoCustomError`]: type.NoCustomError.html
     /// [`FromRequest`]: trait.FromRequest.html
     /// [`FromRequest::Error`]: trait.FromRequest.html#associatedtype.Error
     type Error: Send + 'static;
@@ -740,11 +758,11 @@ pub trait Guard: Sized {
     /// Because `impl Trait` cannot be used inside traits (and named
     /// existential types aren't stable), the type here might not be
     /// nameable. In that case, you can set it to
-    /// [`DefaultFuture<Self, Error>`][`DefaultFuture`] and box the returned
+    /// [`DefaultFuture<Self, Self::Error>`][`DefaultFuture`] and box the returned
     /// future.
     ///
     /// If your guard doesn't need to return a future (eg. because it's just a
-    /// parsing step), you can set this to `Result<Self, BoxedError>` and
+    /// parsing step), you can set this to `Result<Self, Self::Error>` and
     /// immediately return the result of the conversion.
     ///
     /// [`Guard::from_request`]: #tymethod.from_request
@@ -879,6 +897,10 @@ pub trait FromBody: Sized {
     ///
     /// `Error: std::error::Error + Send + Sync + 'static`
     ///
+    /// Be aware that custom guard errors are turned into custom [`FromRequest`]
+    /// errors, which are returned as hyper `Service` errors. Which might not
+    /// be handled in the way you expect (See [`FromRequest::Error`]'s
+    /// documentation for more details).
     ///
     /// [`FromRequest`]: trait.FromRequest.html
     /// [`FromRequest::Error`]: trait.FromRequest.html#associatedtype.Error
@@ -890,11 +912,11 @@ pub trait FromBody: Sized {
     /// Because `impl Trait` cannot be used inside traits (and named
     /// existential types aren't stable), the type here might not be
     /// nameable. In that case, you can set it to
-    /// [`DefaultFuture<Self, Error>`][`DefaultFuture`] and box the returned
+    /// [`DefaultFuture<Self, Self::Error>`][`DefaultFuture`] and box the returned
     /// future.
     ///
     /// If your `FromBody` implementation doesn't need to return a future, you
-    /// can set this to `Result<Self, BoxedError>` and immediately return the
+    /// can set this to `Result<Self, Self::Error>` and immediately return the
     /// result of the conversion.
     ///
     /// [`DefaultFuture`]: type.DefaultFuture.html
