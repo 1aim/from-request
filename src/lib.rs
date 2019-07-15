@@ -236,9 +236,9 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// `Result` type and [`NoCustomError`] as `Error` type.
 ///
 /// **Be aware that any custom error is a `hyper::Service` error and as such
-/// isn't handled by hyper by dropping the connection. To have custom error
+/// is handled by hyper by dropping the connection. To have custom error
 /// handling you have to wrap the created `hyper::Service` (e.g. wrap the
-/// result of [`SyncService::new`]**
+/// result of [`SyncService::new`])**
 ///
 /// Note that the generated implementation will make use of `.and_then()` to
 /// chain asynchronous operations instead of running them in parallel using
@@ -247,8 +247,8 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// requests will still be handled in parallel, so this should not negatively
 /// affect performance. Note that the only operations which could be executed
 /// in parallel are the creations of all `Guard` instances (and maybe the
-/// `FromBody` instance). So for many routes this is a irrelevant implementation
-/// detail.
+/// `FromBody` instance). Because of this for many routes this is an irrelevant
+/// implementation detail.
 ///
 /// In order to keep the implementation simple and user code more easily
 /// understandable, overlapping paths are not allowed (unless the paths are
