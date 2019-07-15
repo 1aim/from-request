@@ -710,9 +710,15 @@ pub trait Guard: Sized {
 
     /// Error returned when this guard fails.
     ///
-    /// While this trait itself doesn't have many bounds on `Error` it is required
-    /// to be possible to convert a error of a guard into the error of the route
-    /// enum it is used in (using `Into.into()`).
+    /// This error type needs to be convertible into any [`FromRequest::Error`]
+    /// of a [`FromRequest`] implementation it is used in (using `Into`).
+    ///
+    /// Because of this it is recommended to make sure it has following bounds:
+    ///
+    /// `Error: std::error::Error + Send + Sync + 'static`
+    ///
+    /// [`FromRequest`]: trait.FromRequest.html
+    /// [`FromRequest::Error`]: trait.FromRequest.html#associatedtype.Error
     type Error: Send + 'static;
 
     /// The result returned by [`Guard::from_request`].
@@ -838,14 +844,22 @@ pub trait FromBody: Sized {
     /// Error returned when the creation of a body using `FromBody` fails.
     ///
     /// This error needs to be convertible to the [`FromRequest::Error`] type
-    /// of the routing struct this body type is used in.
+    /// of the routing struct this body type is used in (using `Into`).
     ///
     /// If your body implementation can not fail, or only fails if there is
-    /// a `hyper::Error` use [`NoCustomError`]
+    /// a `hyper::Error` use [`NoCustomError`].
     ///
+    /// Due to the fact that it this error type needs to be convertible to
+    /// [`FromRequest::Error`]'s for [`FromRequest`] implementations it is used
+    /// in it's recommended to make sure it has following bounds:
+    ///
+    /// `Error: std::error::Error + Send + Sync + 'static`
+    ///
+    ///
+    /// [`FromRequest`]: trait.FromRequest.html
     /// [`FromRequest::Error`]: trait.FromRequest.html#associatedtype.Error
     /// [`NoCustomError`]: type.NoCustomError.html
-    type Error: StdError + From<hyper::Error> + Send + Sync + 'static;
+    type Error: Send + 'static;
 
     /// The result returned by [`from_body`].
     ///
