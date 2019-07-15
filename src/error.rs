@@ -207,6 +207,15 @@ where
     }
 }
 
+impl<E> From<E> for FromRequestError<E>
+where
+    E: 'static
+{
+    fn from(e: E) -> Self {
+        FromRequestError::Custom(e)
+    }
+}
+
 /// The error type used by this library.
 #[derive(Debug)]
 pub struct BuildInError {

@@ -858,7 +858,7 @@ pub trait Guard: Sized {
 ///     ) -> Self::Result {
 ///         Box::new(body
 ///             .map_err(FromRequestError::hyper_error)
-///             .fold(0, |checksum, chunk| {
+///             .fold(0, |checksum, chunk| -> Result<_, FromRequestError<_>> {
 ///                 Ok(chunk.as_ref().iter()
 ///                     .fold(checksum, |checksum: u8, byte| {
 ///                         checksum.wrapping_add(*byte)
