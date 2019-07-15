@@ -397,7 +397,7 @@ where
                     // Responses to HEAD requests must have an empty body
                     response.map(|_| Body::empty())
                 } else {
-                    response.map(|body| body.into())
+                    response
                 }
             })
             .or_else(|err| match err {

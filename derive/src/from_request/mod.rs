@@ -730,7 +730,7 @@ fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStre
         Ident::new(&format!("fld_{}", name), Span::call_site())
     });
     let mut future = quote! {
-        Result::<_, FromRequestError<_>>::Ok(#construct).into_future()
+        Result::Ok(#construct).into_future()
     };
 
     // Read the body
