@@ -76,7 +76,7 @@ use std::{fmt, sync::Arc};
 /// [`hyperdrive::Error`]: ../struct.Error.html
 pub struct AsyncService<H, R, F>
 where
-    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + Clone + 'static,
+    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + 'static,
     R: FromRequest,
     R::Context: Clone,
     R::Future: 'static,
@@ -88,7 +88,7 @@ where
 
 impl<H, R, F> AsyncService<H, R, F>
 where
-    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + Clone + 'static,
+    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + 'static,
     R: FromRequest<Context = NoContext>,
     R::Future: 'static,
     F: Future<Item = Response<Body>, Error = R::Error> + Send + 'static,
@@ -110,7 +110,7 @@ where
 
 impl<H, R, F> AsyncService<H, R, F>
 where
-    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + Clone + 'static,
+    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + 'static,
     R: FromRequest,
     R::Context: Clone,
     R::Future: 'static,
@@ -138,7 +138,7 @@ where
 
 impl<H, R, F> Clone for AsyncService<H, R, F>
 where
-    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + Clone + 'static,
+    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + 'static,
     R: FromRequest,
     R::Context: Clone,
     R::Future: 'static,
@@ -154,7 +154,7 @@ where
 
 impl<C, H, R, F> MakeService<C> for AsyncService<H, R, F>
 where
-    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + Clone + 'static,
+    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + 'static,
     R: FromRequest,
     R::Context: Clone,
     R::Future: 'static,
@@ -174,7 +174,7 @@ where
 
 impl<H, R, F> Service for AsyncService<H, R, F>
 where
-    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + Clone + 'static,
+    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + 'static,
     R: FromRequest,
     R::Context: Clone,
     R::Future: 'static,
@@ -213,7 +213,7 @@ where
 
 impl<H, R, F> fmt::Debug for AsyncService<H, R, F>
 where
-    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + Clone + 'static,
+    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + 'static,
     R: FromRequest,
     R::Context: Clone + fmt::Debug,
     R::Future: 'static,
@@ -289,7 +289,7 @@ where
 /// [`hyperdrive::Error`]: ../struct.Error.html
 pub struct SyncService<H, R>
 where
-    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + Clone + 'static,
+    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + 'static,
     R: FromRequest + Send + 'static,
     R::Context: Clone,
 {
@@ -299,7 +299,7 @@ where
 
 impl<H, R> SyncService<H, R>
 where
-    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + Clone + 'static,
+    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + 'static,
     R: FromRequest<Context = NoContext> + Send + 'static,
 {
     /// Creates a `SyncService` that will call `handler` to process incoming
@@ -311,7 +311,7 @@ where
 
 impl<H, R> SyncService<H, R>
 where
-    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + Clone + 'static,
+    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + 'static,
     R: FromRequest + Send + 'static,
     R::Context: Clone,
 {
@@ -339,7 +339,7 @@ where
 
 impl<H, R> Clone for SyncService<H, R>
 where
-    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + Clone + 'static,
+    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + 'static,
     R: FromRequest + Send + 'static,
     R::Context: Clone,
 {
@@ -353,7 +353,7 @@ where
 
 impl<C, H, R> MakeService<C> for SyncService<H, R>
 where
-    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + Clone + 'static,
+    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + 'static,
     R: FromRequest + Send + 'static,
     R::Context: Clone,
 {
@@ -371,7 +371,7 @@ where
 
 impl<H, R> Service for SyncService<H, R>
 where
-    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + Clone + 'static,
+    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + 'static,
     R: FromRequest + Send + 'static,
     R::Context: Clone,
 {
@@ -413,7 +413,7 @@ where
 
 impl<H, R> fmt::Debug for SyncService<H, R>
 where
-    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + Clone + 'static,
+    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + 'static,
     R: FromRequest + Send + 'static,
     R::Context: Clone + fmt::Debug,
 {
