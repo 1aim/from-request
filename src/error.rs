@@ -102,7 +102,8 @@ where
     ///
     /// [`FromRequestError::Custom`]: enum.FromRequestError.html#variant.Custom
     pub fn hyper_error(h: hyper::Error) -> Self
-        where hyper::Error: Into<E>
+    where
+        hyper::Error: Into<E>,
     {
         FromRequestError::Custom(h.into())
     }
@@ -209,7 +210,7 @@ where
 
 impl<E> From<E> for FromRequestError<E>
 where
-    E: 'static
+    E: 'static,
 {
     fn from(e: E) -> Self {
         FromRequestError::Custom(e)

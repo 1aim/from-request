@@ -2,8 +2,8 @@ use hyperdrive::{
     body::Json,
     http::{Method, Request, StatusCode},
     hyper::Body,
-    BoxedError, BuildInErrorKind, FromRequest, FromRequestError, Guard, NoContext,
-    NoCustomError, RequestContext,
+    BoxedError, BuildInErrorKind, FromRequest, FromRequestError, Guard, NoContext, NoCustomError,
+    RequestContext,
 };
 use serde::Deserialize;
 use std::{str::FromStr, sync::Arc};
