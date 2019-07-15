@@ -420,7 +420,7 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
         extern crate hyperdrive;
         use hyperdrive::{
             FromBody, FromRequest, Guard, DefaultFuture, NoContext,
-            FromRequestError, NoCustomError,
+            FromRequestError, NoCustomError, BuildInError, BuildInErrorKind,
             http, hyper, lazy_static, regex::{RegexSet, Regex},
             futures::{IntoFuture, Future}
         };

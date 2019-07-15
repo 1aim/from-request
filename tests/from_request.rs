@@ -2,7 +2,7 @@ use hyperdrive::{
     body::Json,
     http::{Method, Request, StatusCode},
     hyper::Body,
-    BoxedError, BuildInError, BuildInErrorKind, FromRequest, FromRequestError, Guard, NoContext,
+    BoxedError, BuildInErrorKind, FromRequest, FromRequestError, Guard, NoContext,
     NoCustomError, RequestContext,
 };
 use serde::Deserialize;

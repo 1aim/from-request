@@ -71,8 +71,8 @@ where
     ///
     /// [`FromRequestError::BuildIn`]: enum.FromRequestError.html#variant.BuildIn
     /// [`BuildInError.malformed_body()`]: struct.BuildInError.html#method.malformed_body
-    pub fn malformed_body(source: BoxedError) -> Self {
-        FromRequestError::BuildIn(BuildInError::malformed_body(source))
+    pub fn malformed_body(source: impl Into<BoxedError>) -> Self {
+        FromRequestError::BuildIn(BuildInError::malformed_body(source.into()))
     }
 
     /// Creates a [`FromRequestError::BuildIn`] variant using [`BuildInErrorKind.wrong_method()`].
@@ -93,6 +93,18 @@ where
     pub fn no_matching_route() -> Self {
         let build_in = BuildInError::from_kind(BuildInErrorKind::NoMatchingRoute);
         FromRequestError::BuildIn(build_in)
+    }
+
+    /// Creates a `FromRequestError::Custom`] variant based on a `hyper::Error`.
+    ///
+    /// This method is only available if `hyper::Error: Into<E>` (or if
+    /// `E: From<hyper::Error>` respectively).
+    ///
+    /// [`FromRequestError::Custom`]: enum.FromRequestError.html#variant.Custom
+    pub fn hyper_error(h: hyper::Error) -> Self
+        where hyper::Error: Into<E>
+    {
+        FromRequestError::Custom(h.into())
     }
 
     /// If this error is a [`FromRequestError::BuildIn`] return a reference to it.
@@ -286,10 +298,10 @@ impl BuildInError {
     /// Call `map` on the response to supply your own HTTP payload:
     ///
     /// ```
-    /// use hyperdrive::{Error, BuildInErrorKind};
+    /// use hyperdrive::{BuildInError, BuildInErrorKind};
     /// use hyper::Body;
     ///
-    /// let error = Error::from_kind(BuildInErrorKind::NoMatchingRoute);
+    /// let error = BuildInError::from_kind(BuildInErrorKind::NoMatchingRoute);
     /// let response = error.response()
     ///     .map(|()| Body::from("oh no!"));
     /// ```

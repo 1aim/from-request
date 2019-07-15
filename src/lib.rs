@@ -70,10 +70,10 @@
 //!         // This closure can block freely, and has to return a `Response<Body>`
 //!         match route {
 //!             Route::Index => {
-//!                 Response::new(Body::from("Hello World!"))
+//!                 Ok(Response::new(Body::from("Hello World!")))
 //!             },
 //!             Route::UserInfo { id } => {
-//!                 Response::new(Body::from(format!("User #{}", id)))
+//!                 Ok(Response::new(Body::from(format!("User #{}", id))))
 //!             }
 //!         }
 //!     }));
@@ -86,7 +86,7 @@
 //! ```
 //! use hyper::{Request, Response, Body, Method, service::Service};
 //! use futures::Future;
-//! use hyperdrive::{FromRequest, DefaultFuture, BoxedError, NoContext};
+//! use hyperdrive::{FromRequest, FromRequestError, DefaultFuture, NoCustomError, NoContext};
 //!
 //! #[derive(FromRequest)]
 //! enum Route {
@@ -103,8 +103,8 @@
 //! impl Service for MyService {
 //!     type ReqBody = Body;
 //!     type ResBody = Body;
-//!     type Error = BoxedError;
-//!     type Future = DefaultFuture<Response<Body>, BoxedError>;
+//!     type Error = NoCustomError;
+//!     type Future = DefaultFuture<Response<Body>, Self::Error>;
 //!
 //!     fn call(&mut self, req: Request<Body>) -> Self::Future {
 //!         let is_head = req.method() == Method::HEAD;
@@ -121,6 +121,11 @@
 //!                 resp.map(|_| Body::empty())
 //!             } else {
 //!                 resp
+//!             }
+//!         }).or_else(move |err| match err {
+//!             FromRequestError::Custom(err) => Err(err),
+//!             FromRequestError::BuildIn(err) => {
+//!                 Ok(err.response().map(|_| Body::empty()))
 //!             }
 //!         });
 //!
@@ -392,7 +397,7 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 ///
 /// ```
 /// use hyperdrive::{FromRequest, Guard};
-/// # use hyperdrive::{BoxedError, NoContext};
+/// # use hyperdrive::{NoContext, NoCustomError};
 /// # use std::sync::Arc;
 ///
 /// struct User {
@@ -403,8 +408,9 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// impl Guard for User {
 ///     // (omitted for brevity)
 /// #     type Context = NoContext;
-/// #     type Result = Result<Self, BoxedError>;
-/// #     fn from_request(_: &Arc<http::Request<()>>, _: &NoContext) -> Result<Self, BoxedError> {
+/// #     type Error = NoCustomError;
+/// #     type Result = Result<Self, Self::Error>;
+/// #     fn from_request(_: &Arc<http::Request<()>>, _: &NoContext) -> Self::Result {
 /// #         User { id: 0 }.id;
 /// #         Ok(User { id: 0 })
 /// #     }
@@ -445,15 +451,16 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 ///
 /// ```
 /// use hyperdrive::{FromRequest, Guard};
-/// # use hyperdrive::{NoContext, BoxedError};
+/// # use hyperdrive::{NoContext, NoCustomError};
 /// # use std::sync::Arc;
 ///
 /// struct User;
 /// impl Guard for User {
 ///     // (omitted for brevity)
 /// #     type Context = NoContext;
-/// #     type Result = Result<Self, BoxedError>;
-/// #     fn from_request(_: &Arc<http::Request<()>>, _: &NoContext) -> Result<Self, BoxedError> {
+/// #     type Error = NoCustomError;
+/// #     type Result = Result<Self, Self::Error>;
+/// #     fn from_request(_: &Arc<http::Request<()>>, _: &NoContext) -> Self::Result {
 /// #         Ok(User)
 /// #     }
 /// }
@@ -641,7 +648,10 @@ pub trait FromRequest: Sized {
 ///
 /// # Examples
 ///
-/// Define a guard that ensures that required request headers are present:
+/// Define a guard that ensures that required request headers are present (
+/// be aware that without custom error handling this errors with not result
+/// into a proper HTTP response. Custom error handling can be done e.g. by
+/// wrapping the service the `Guard` is used in):
 ///
 /// ```
 /// # use hyperdrive::{Guard, NoContext, BoxedError};
@@ -650,7 +660,8 @@ pub trait FromRequest: Sized {
 ///
 /// impl Guard for MustFrobnicate {
 ///     type Context = NoContext;
-///     type Result = Result<Self, BoxedError>;
+///     type Error = BoxedError;
+///     type Result = Result<Self, Self::Error>;
 ///
 ///     fn from_request(request: &Arc<http::Request<()>>, context: &Self::Context) -> Self::Result {
 ///         if request.headers().contains_key("X-Frobnicate") {
@@ -664,7 +675,9 @@ pub trait FromRequest: Sized {
 /// ```
 ///
 /// Use server settings stored in a [`RequestContext`] to exclude certain user
-/// agents:
+/// agents (be aware that without a proper custom error handling this will _not_
+/// send back a proper error response, custom error handling can be done e.g. by
+/// wrapping the service the guard is used in):
 ///
 /// ```
 /// # use hyperdrive::{Guard, RequestContext, BoxedError};
@@ -678,7 +691,8 @@ pub trait FromRequest: Sized {
 ///
 /// impl Guard for RejectForbiddenAgents {
 ///     type Context = ForbiddenAgents;
-///     type Result = Result<Self, BoxedError>;
+///     type Error = BoxedError;
+///     type Result = Result<Self, Self::Error>;
 ///
 ///     fn from_request(request: &Arc<http::Request<()>>, context: &Self::Context) -> Self::Result {
 ///         let agent = request.headers().get("User-Agent")
@@ -769,7 +783,7 @@ pub trait Guard: Sized {
 /// crate `serde_whatever`:
 ///
 /// ```
-/// # use hyperdrive::{FromBody, NoContext, DefaultFuture, BoxedError};
+/// # use hyperdrive::{FromBody, NoContext, DefaultFuture, FromRequestError, NoCustomError};
 /// # use futures::prelude::*;
 /// # use serde_json as serde_whatever;
 /// # use std::sync::Arc;
@@ -777,19 +791,30 @@ pub trait Guard: Sized {
 ///
 /// impl<T: serde::de::DeserializeOwned + Send + 'static> FromBody for CustomFormat<T> {
 ///     type Context = NoContext;
-///     type Result = DefaultFuture<Self, BoxedError>;
+///     type Error = NoCustomError;
+///     type Result = DefaultFuture<Self, FromRequestError<Self::Error>>;
 ///
 ///     fn from_body(
 ///         request: &Arc<http::Request<()>>,
 ///         body: hyper::Body,
 ///         context: &Self::Context,
 ///     ) -> Self::Result {
-///         Box::new(body.concat2().map_err(Into::into).and_then(|body| {
+///         // The `concat2()` can return a hyper::Error which is handled by
+///         // the custom error type (here `NoCustomError`).
+///         let res = body.concat2().map_err(FromRequestError::hyper_error).and_then(|body| {
 ///             match serde_whatever::from_slice(&body) {
 ///                 Ok(t) => Ok(CustomFormat(t)),
-///                 Err(e) => Err(e.into()),
+///                 Err(e) => {
+///                     // The `BuildInError` has a number of useful error variants,
+///                     // which allow you to not use a custom error, which also would
+///                     // require custom error handling by e.g. wrapping services this
+///                     // body is used in.
+///                     Err(FromRequestError::malformed_body(e))
+///                 },
 ///             }
-///         }))
+///         });
+///
+///         Box::new(res)
 ///     }
 /// }
 /// ```
@@ -798,16 +823,15 @@ pub trait Guard: Sized {
 /// the bytes:
 ///
 /// ```
-/// # use hyperdrive::{FromBody, NoContext, DefaultFuture, BoxedError};
+/// # use hyperdrive::{FromBody, NoContext, DefaultFuture, NoCustomError, FromRequestError};
 /// # use futures::prelude::*;
 /// # use std::sync::Arc;
 /// struct BodyChecksum(u8);
 ///
-/// impl<E> FromBody<E> for BodyChecksum
-///     where E: StdError + From<hyper::Error> + Send + Sync + 'static
-/// {
+/// impl FromBody for BodyChecksum {
 ///     type Context = NoContext;
-///     type Result = DefaultFuture<Self, FromRequest<E>>;
+///     type Error = NoCustomError;
+///     type Result = DefaultFuture<Self, FromRequestError<Self::Error>>;
 ///
 ///     fn from_body(
 ///         request: &Arc<http::Request<()>>,
@@ -815,8 +839,8 @@ pub trait Guard: Sized {
 ///         context: &Self::Context,
 ///     ) -> Self::Result {
 ///         Box::new(body
-///             .map_err(Into::into)
-///             .fold(0, |checksum, chunk| -> Result<_, FromRequest<E>> {
+///             .map_err(FromRequestError::hyper_error)
+///             .fold(0, |checksum, chunk| {
 ///                 Ok(chunk.as_ref().iter()
 ///                     .fold(checksum, |checksum: u8, byte| {
 ///                         checksum.wrapping_add(*byte)

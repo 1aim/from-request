@@ -111,10 +111,10 @@ where
     ) -> Self::Result {
         let fut = body
             .concat2()
-            .map_err(|err| FromRequestError::Custom(err.into()))
+            .map_err(FromRequestError::hyper_error)
             .and_then(|body| match serde_urlencoded::from_bytes(&body) {
                 Ok(t) => Ok(HtmlForm(t)),
-                Err(err) => Err(FromRequestError::malformed_body(err.into())),
+                Err(err) => Err(FromRequestError::malformed_body(err)),
             });
 
         Box::new(fut)
@@ -191,10 +191,10 @@ where
     ) -> Self::Result {
         let fut = body
             .concat2()
-            .map_err(|err| FromRequestError::Custom(err.into()))
+            .map_err(FromRequestError::hyper_error)
             .and_then(|body| match serde_json::from_slice(&body) {
                 Ok(t) => Ok(Json(t)),
-                Err(err) => Err(FromRequestError::malformed_body(err.into())),
+                Err(err) => Err(FromRequestError::malformed_body(err)),
             });
 
         Box::new(fut)

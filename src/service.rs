@@ -276,7 +276,7 @@ where
 ///
 /// let service = SyncService::new(|route: Route, orig: Arc<Request<()>>| {
 ///     match route {
-///         Route::Index => Response::new(Body::from("Hello world!")),
+///         Route::Index => Ok(Response::new(Body::from("Hello world!"))),
 ///     }
 /// });
 ///
