@@ -168,7 +168,7 @@ pub use {lazy_static::lazy_static, regex};
 
 use doc_comment::doctest;
 use futures::{Future, IntoFuture};
-use std::sync::Arc;
+use std::{error::Error as StdError, sync::Arc};
 use tokio::runtime::current_thread::Runtime;
 
 doctest!("../README.md");
@@ -547,7 +547,7 @@ pub trait FromRequest: Sized {
     /// [`NoCustomError`]: type.NoCustomError.html
     /// [`Guard`]: trait.Guard.html
     /// [`FromBody`]: trait.FromBody.html
-    type Error: PossibleCustomErrorMarker;
+    type Error: StdError + From<hyper::Error> + Send + Sync + 'static;
 
     /// The future returned by [`from_request`].
     ///
@@ -792,13 +792,13 @@ pub trait Guard: Sized {
 /// the bytes:
 ///
 /// ```
-/// # use hyperdrive::{FromBody, NoContext, DefaultFuture, BoxedError, PossibleCustomErrorMarker};
+/// # use hyperdrive::{FromBody, NoContext, DefaultFuture, BoxedError};
 /// # use futures::prelude::*;
 /// # use std::sync::Arc;
 /// struct BodyChecksum(u8);
 ///
 /// impl<E> FromBody<E> for BodyChecksum
-///     where E: PossibleCustomErrorMarker
+///     where E: StdError + From<hyper::Error> + Send + Sync + 'static
 /// {
 ///     type Context = NoContext;
 ///     type Result = DefaultFuture<Self, FromRequest<E>>;
@@ -845,7 +845,7 @@ pub trait FromBody: Sized {
     ///
     /// [`FromRequest::Error`]: trait.FromRequest.html#associatedtype.Error
     /// [`NoCustomError`]: type.NoCustomError.html
-    type Error: PossibleCustomErrorMarker;
+    type Error: StdError + From<hyper::Error> + Send + Sync + 'static;
 
     /// The result returned by [`from_body`].
     ///

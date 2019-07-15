@@ -19,28 +19,6 @@ use std::{
 /// [`FromBody`]: trait.FromBody.html
 pub type NoCustomError = hyper::Error;
 
-/// Marker trait representing `StdError + From<hyper::Error> + Send + Sync + 'static`.
-///
-/// This trait is automatically implemented for any type which implements all of
-/// the following traits:
-///
-/// - `std::error::Error`
-/// - `From<hyper::Error>`
-/// - `Send`
-/// - `Sync`
-/// - `'static`
-///
-/// It's used so that code in this crate and code providing custom `FromBody`/`Guard`
-/// implementations can just have a `where E: PossibleCustomErrorMarker` bound. (This
-/// crate alone has ~30+ places where such a bound needs to be repeated).
-///
-pub trait PossibleCustomErrorMarker: StdError + From<hyper::Error> + Send + Sync + 'static {}
-
-impl<E> PossibleCustomErrorMarker for E where
-    E: StdError + From<hyper::Error> + Send + Sync + 'static
-{
-}
-
 /// Error returned by [`FromRequest`] implementations and [`FromBody`] implementations.
 ///
 /// [`FromRequest`]: trait.FromRequest.html
@@ -48,7 +26,7 @@ impl<E> PossibleCustomErrorMarker for E where
 #[derive(Debug)]
 pub enum FromRequestError<E>
 where
-    E: PossibleCustomErrorMarker,
+    E: StdError + From<hyper::Error> + Send + Sync + 'static,
 {
     /// Custom error which can be returned by [`Guard`]'s and route handlers.
     ///
@@ -76,7 +54,7 @@ where
 
 impl<E> FromRequestError<E>
 where
-    E: PossibleCustomErrorMarker,
+    E: StdError + From<hyper::Error> + Send + Sync + 'static,
 {
     /// Creates a [`FromRequestError::BuildIn`] variant using [`BuildInError.malformed_body()`].
     ///
@@ -167,7 +145,7 @@ where
     /// run into conflicting implementations problems.
     pub fn convert_custom_error<NewError>(self) -> FromRequestError<NewError>
     where
-        NewError: PossibleCustomErrorMarker,
+        NewError: StdError + From<hyper::Error> + Send + Sync + 'static,
         E: Into<NewError>,
     {
         use self::FromRequestError::*;
@@ -180,7 +158,7 @@ where
 
 impl<E> StdError for FromRequestError<E>
 where
-    E: PossibleCustomErrorMarker,
+    E: StdError + From<hyper::Error> + Send + Sync + 'static,
 {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         use self::FromRequestError::*;
@@ -193,7 +171,7 @@ where
 
 impl<E> Display for FromRequestError<E>
 where
-    E: PossibleCustomErrorMarker,
+    E: StdError + From<hyper::Error> + Send + Sync + 'static,
 {
     fn fmt(&self, fter: &mut fmt::Formatter<'_>) -> fmt::Result {
         use self::FromRequestError::*;
