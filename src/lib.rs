@@ -517,6 +517,38 @@ pub trait FromRequest: Sized {
     /// [`RequestContext`]: trait.RequestContext.html
     type Context: RequestContext;
 
+    /// Custom error used for this `FromRequest` implementation.
+    ///
+    /// This allows returning custom error types from [`Guard`] and [`FromBody`]
+    /// implementations as well as from the rout handling function.
+    ///
+    /// **Be aware that hyper by default doesn't handle errors returned by
+    /// a services. It will just _drop_ the connection and not log anything.**
+    /// While this might seem strange it is a good default for any `hyper::Error`
+    /// as they indicate that the connection was messed up by external factors (e.g.
+    /// the client physically disconnected or starts sending random bytes). If you
+    /// want to custom handle some errors you need to wrap the `Service`.
+    ///
+    /// If `FromRequest` is derived then any guard, body as forwarding type
+    /// as well as the route handling function need to have an error type,
+    /// which can be converted into this error type using `Into`.
+    ///
+    /// To use a custom error with the `FromRequestDerive` use the
+    /// `error` attribute on the type in a similar way to how the
+    /// `context` attribute is used.
+    ///
+    /// The default value for this is [`NoCustomError`]. This should also
+    /// be used in the case your rout handling function (or guards etc.) do
+    /// not produce any (additional) errors.
+    ///
+    /// The error needs to implement `From<hyper::Error>` as hyper errors can
+    /// always be produced by parsing the request (including it's body).
+    ///
+    /// [`NoCustomError`]: type.NoCustomError.html
+    /// [`Guard`]: trait.Guard.html
+    /// [`FromBody`]: trait.FromBody.html
+    type Error: PossibleCustomErrorMarker;
+
     /// The future returned by [`from_request`].
     ///
     /// Because `impl Trait` cannot be used inside traits (and named
@@ -527,7 +559,7 @@ pub trait FromRequest: Sized {
     ///
     /// [`DefaultFuture`]: type.DefaultFuture.html
     /// [`from_request`]: #tymethod.from_request
-    type Future: Future<Item = Self, Error = BoxedError> + Send;
+    type Future: Future<Item = Self, Error = FromRequestError<Self::Error>> + Send;
 
     /// Creates a `Self` from an HTTP request, asynchronously.
     ///
@@ -592,7 +624,7 @@ pub trait FromRequest: Sized {
     fn from_request_sync(
         request: http::Request<hyper::Body>,
         context: Self::Context,
-    ) -> Result<Self, BoxedError> {
+    ) -> Result<Self, FromRequestError<Self::Error>> {
         let mut rt = Runtime::new().expect("couldn't start single-threaded tokio runtime");
         rt.block_on(Self::from_request(request, context).into_future())
     }
@@ -676,6 +708,13 @@ pub trait Guard: Sized {
     /// [`NoContext`]: struct.NoContext.html
     type Context: RequestContext;
 
+    /// Error returned when this guard fails.
+    ///
+    /// While this trait itself doesn't have many bounds on `Error` it is required
+    /// to be possible to convert a error of a guard into the error of the route
+    /// enum it is used in (using `Into.into()`).
+    type Error: Send + 'static;
+
     /// The result returned by [`Guard::from_request`].
     ///
     /// Because `impl Trait` cannot be used inside traits (and named
@@ -690,7 +729,7 @@ pub trait Guard: Sized {
     ///
     /// [`Guard::from_request`]: #tymethod.from_request
     /// [`DefaultFuture`]: type.DefaultFuture.html
-    type Result: IntoFuture<Item = Self, Error = BoxedError>;
+    type Result: IntoFuture<Item = Self, Error = Self::Error>;
 
     /// Create an instance of this type from HTTP request data, asynchronously.
     ///
@@ -753,14 +792,16 @@ pub trait Guard: Sized {
 /// the bytes:
 ///
 /// ```
-/// # use hyperdrive::{FromBody, NoContext, DefaultFuture, BoxedError};
+/// # use hyperdrive::{FromBody, NoContext, DefaultFuture, BoxedError, PossibleCustomErrorMarker};
 /// # use futures::prelude::*;
 /// # use std::sync::Arc;
 /// struct BodyChecksum(u8);
 ///
-/// impl FromBody for BodyChecksum {
+/// impl<E> FromBody<E> for BodyChecksum
+///     where E: PossibleCustomErrorMarker
+/// {
 ///     type Context = NoContext;
-///     type Result = DefaultFuture<Self, BoxedError>;
+///     type Result = DefaultFuture<Self, FromRequest<E>>;
 ///
 ///     fn from_body(
 ///         request: &Arc<http::Request<()>>,
@@ -768,8 +809,8 @@ pub trait Guard: Sized {
 ///         context: &Self::Context,
 ///     ) -> Self::Result {
 ///         Box::new(body
-///             .map_err(BoxedError::from)
-///             .fold(0, |checksum, chunk| -> Result<_, BoxedError> {
+///             .map_err(Into::into)
+///             .fold(0, |checksum, chunk| -> Result<_, FromRequest<E>> {
 ///                 Ok(chunk.as_ref().iter()
 ///                     .fold(checksum, |checksum: u8, byte| {
 ///                         checksum.wrapping_add(*byte)
@@ -794,6 +835,18 @@ pub trait FromBody: Sized {
     /// [`NoContext`]: struct.NoContext.html
     type Context: RequestContext;
 
+    /// Error returned when the creation of a body using `FromBody` fails.
+    ///
+    /// This error needs to be convertible to the [`FromRequest::Error`] type
+    /// of the routing struct this body type is used in.
+    ///
+    /// If your body implementation can not fail, or only fails if there is
+    /// a `hyper::Error` use [`NoCustomError`]
+    ///
+    /// [`FromRequest::Error`]: trait.FromRequest.html#associatedtype.Error
+    /// [`NoCustomError`]: type.NoCustomError.html
+    type Error: PossibleCustomErrorMarker;
+
     /// The result returned by [`from_body`].
     ///
     /// Because `impl Trait` cannot be used inside traits (and named
@@ -808,7 +861,7 @@ pub trait FromBody: Sized {
     ///
     /// [`DefaultFuture`]: type.DefaultFuture.html
     /// [`from_body`]: #tymethod.from_body
-    type Result: IntoFuture<Item = Self, Error = BoxedError>;
+    type Result: IntoFuture<Item = Self, Error = FromRequestError<Self::Error>>;
 
     /// Create an instance of this type from an HTTP request body,
     /// asynchronously.

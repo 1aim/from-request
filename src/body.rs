@@ -14,11 +14,13 @@
 
 // TODO: Add many more types here and make them optional
 
-use crate::{BoxedError, DefaultFuture, FromBody, NoContext};
+use crate::{DefaultFuture, FromBody, FromRequestError, NoContext, NoCustomError};
 use futures::{Future, Stream};
 use serde::de::DeserializeOwned;
-use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
+use std::{
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 macro_rules! deref {
     ($t:ty) => {
@@ -94,22 +96,28 @@ pub struct HtmlForm<T: DeserializeOwned + Send + 'static>(pub T);
 // uses error-chain, so its error type isn't `Sync`, which unfortunately is
 // rather annoying here.
 
-impl<T: DeserializeOwned + Send + 'static> FromBody for HtmlForm<T> {
+impl<T> FromBody for HtmlForm<T>
+where
+    T: DeserializeOwned + Send + 'static,
+{
     type Context = NoContext;
-
-    type Result = DefaultFuture<Self, BoxedError>;
+    type Error = NoCustomError;
+    type Result = DefaultFuture<Self, FromRequestError<Self::Error>>;
 
     fn from_body(
         _request: &Arc<http::Request<()>>,
         body: hyper::Body,
         _context: &Self::Context,
     ) -> Self::Result {
-        Box::new(body.concat2().map_err(Into::into).and_then(|body| {
-            match serde_urlencoded::from_bytes(&body) {
+        let fut = body
+            .concat2()
+            .map_err(|err| FromRequestError::Custom(err.into()))
+            .and_then(|body| match serde_urlencoded::from_bytes(&body) {
                 Ok(t) => Ok(HtmlForm(t)),
-                Err(e) => Err(e.into()),
-            }
-        }))
+                Err(err) => Err(FromRequestError::malformed_body(err.into())),
+            });
+
+        Box::new(fut)
     }
 }
 
@@ -168,22 +176,28 @@ deref!(HtmlForm<T>);
 #[derive(Debug, PartialEq, Eq)]
 pub struct Json<T: DeserializeOwned + Send + 'static>(pub T);
 
-impl<T: DeserializeOwned + Send + 'static> FromBody for Json<T> {
+impl<T> FromBody for Json<T>
+where
+    T: DeserializeOwned + Send + 'static,
+{
     type Context = NoContext;
-
-    type Result = DefaultFuture<Self, BoxedError>;
+    type Error = NoCustomError;
+    type Result = DefaultFuture<Self, FromRequestError<Self::Error>>;
 
     fn from_body(
         _request: &Arc<http::Request<()>>,
         body: hyper::Body,
         _context: &Self::Context,
     ) -> Self::Result {
-        Box::new(body.concat2().map_err(Into::into).and_then(|body| {
-            match serde_json::from_slice(&body) {
+        let fut = body
+            .concat2()
+            .map_err(|err| FromRequestError::Custom(err.into()))
+            .and_then(|body| match serde_json::from_slice(&body) {
                 Ok(t) => Ok(Json(t)),
-                Err(e) => Err(e.into()),
-            }
-        }))
+                Err(err) => Err(FromRequestError::malformed_body(err.into())),
+            });
+
+        Box::new(fut)
     }
 }
 

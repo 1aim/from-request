@@ -11,14 +11,13 @@
 //! [`AsyncService`]: struct.AsyncService.html
 //! [`SyncService`]: struct.SyncService.html
 
-use crate::{BoxedError, DefaultFuture, Error, FromRequest, NoContext};
+use crate::{BoxedError, DefaultFuture, FromRequest, FromRequestError, NoContext};
 use futures::{future::FutureResult, Future, IntoFuture};
 use hyper::{
     service::{MakeService, Service},
     Body, Method, Request, Response,
 };
-use std::fmt;
-use std::sync::Arc;
+use std::{fmt, sync::Arc};
 
 /// Asynchronous hyper service adapter.
 ///
@@ -77,11 +76,11 @@ use std::sync::Arc;
 /// [`hyperdrive::Error`]: ../struct.Error.html
 pub struct AsyncService<H, R, F>
 where
-    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + 'static,
+    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + Clone + 'static,
     R: FromRequest,
     R::Context: Clone,
     R::Future: 'static,
-    F: Future<Item = Response<Body>, Error = BoxedError> + Send + 'static,
+    F: Future<Item = Response<Body>, Error = R::Error> + Send + 'static,
 {
     handler: Arc<H>,
     context: R::Context,
@@ -89,10 +88,10 @@ where
 
 impl<H, R, F> AsyncService<H, R, F>
 where
-    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + 'static,
+    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + Clone + 'static,
     R: FromRequest<Context = NoContext>,
     R::Future: 'static,
-    F: Future<Item = Response<Body>, Error = BoxedError> + Send + 'static,
+    F: Future<Item = Response<Body>, Error = R::Error> + Send + 'static,
 {
     /// Creates an `AsyncService` from a handler closure.
     ///
@@ -111,11 +110,11 @@ where
 
 impl<H, R, F> AsyncService<H, R, F>
 where
-    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + 'static,
+    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + Clone + 'static,
     R: FromRequest,
     R::Context: Clone,
     R::Future: 'static,
-    F: Future<Item = Response<Body>, Error = BoxedError> + Send + 'static,
+    F: Future<Item = Response<Body>, Error = R::Error> + Send + 'static,
 {
     /// Creates an `AsyncService` that will call `handler` to process incoming
     /// requests.
@@ -139,11 +138,11 @@ where
 
 impl<H, R, F> Clone for AsyncService<H, R, F>
 where
-    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + 'static,
+    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + Clone + 'static,
     R: FromRequest,
     R::Context: Clone,
     R::Future: 'static,
-    F: Future<Item = Response<Body>, Error = BoxedError> + Send + 'static,
+    F: Future<Item = Response<Body>, Error = R::Error> + Send + 'static,
 {
     fn clone(&self) -> Self {
         Self {
@@ -155,15 +154,15 @@ where
 
 impl<C, H, R, F> MakeService<C> for AsyncService<H, R, F>
 where
-    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + 'static,
+    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + Clone + 'static,
     R: FromRequest,
     R::Context: Clone,
     R::Future: 'static,
-    F: Future<Item = Response<Body>, Error = BoxedError> + Send + 'static,
+    F: Future<Item = Response<Body>, Error = R::Error> + Send + 'static,
 {
     type ReqBody = Body;
     type ResBody = Body;
-    type Error = BoxedError;
+    type Error = R::Error;
     type Service = Self;
     type Future = FutureResult<Self, BoxedError>;
     type MakeError = BoxedError;
@@ -175,16 +174,16 @@ where
 
 impl<H, R, F> Service for AsyncService<H, R, F>
 where
-    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + 'static,
+    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + Clone + 'static,
     R: FromRequest,
     R::Context: Clone,
     R::Future: 'static,
-    F: Future<Item = Response<Body>, Error = BoxedError> + Send + 'static,
+    F: Future<Item = Response<Body>, Error = R::Error> + Send + 'static,
 {
     type ReqBody = Body;
     type ResBody = Body;
-    type Error = BoxedError;
-    type Future = DefaultFuture<Response<Body>, BoxedError>;
+    type Error = R::Error;
+    type Future = DefaultFuture<Response<Body>, R::Error>;
 
     fn call(&mut self, req: Request<Self::ReqBody>) -> Self::Future {
         let is_head = req.method() == Method::HEAD;
@@ -192,7 +191,7 @@ where
         let (parts, body) = req.into_parts();
         let req = Arc::new(Request::from_parts(parts, ()));
         let fut = R::from_request_and_body(&req, body, self.context.clone())
-            .and_then(move |r| handler(r, req))
+            .and_then(move |r| handler(r, req).map_err(FromRequestError::Custom))
             .map(move |response| {
                 if is_head {
                     // Responses to HEAD requests must have an empty body
@@ -201,12 +200,11 @@ where
                     response
                 }
             })
-            .or_else(|err| {
-                if let Some(our_error) = err.downcast_ref::<Error>() {
+            .or_else(|err| match err {
+                FromRequestError::BuildIn(our_error) => {
                     Ok(our_error.response().map(|()| Body::empty()))
-                } else {
-                    Err(err)
                 }
+                FromRequestError::Custom(err) => Err(err),
             });
 
         Box::new(fut)
@@ -215,11 +213,11 @@ where
 
 impl<H, R, F> fmt::Debug for AsyncService<H, R, F>
 where
-    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + 'static,
+    H: Fn(R, Arc<Request<()>>) -> F + Send + Sync + Clone + 'static,
     R: FromRequest,
     R::Context: Clone + fmt::Debug,
     R::Future: 'static,
-    F: Future<Item = Response<Body>, Error = BoxedError> + Send + 'static,
+    F: Future<Item = Response<Body>, Error = R::Error> + Send + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Closures aren't debug-printable, so we print a few Arc stats instead
@@ -291,7 +289,7 @@ where
 /// [`hyperdrive::Error`]: ../struct.Error.html
 pub struct SyncService<H, R>
 where
-    H: Fn(R, Arc<Request<()>>) -> Response<Body> + Send + Sync + 'static,
+    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + Clone + 'static,
     R: FromRequest + Send + 'static,
     R::Context: Clone,
 {
@@ -301,7 +299,7 @@ where
 
 impl<H, R> SyncService<H, R>
 where
-    H: Fn(R, Arc<Request<()>>) -> Response<Body> + Send + Sync + 'static,
+    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + Clone + 'static,
     R: FromRequest<Context = NoContext> + Send + 'static,
 {
     /// Creates a `SyncService` that will call `handler` to process incoming
@@ -313,7 +311,7 @@ where
 
 impl<H, R> SyncService<H, R>
 where
-    H: Fn(R, Arc<Request<()>>) -> Response<Body> + Send + Sync + 'static,
+    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + Clone + 'static,
     R: FromRequest + Send + 'static,
     R::Context: Clone,
 {
@@ -341,7 +339,7 @@ where
 
 impl<H, R> Clone for SyncService<H, R>
 where
-    H: Fn(R, Arc<Request<()>>) -> Response<Body> + Send + Sync + 'static,
+    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + Clone + 'static,
     R: FromRequest + Send + 'static,
     R::Context: Clone,
 {
@@ -355,13 +353,13 @@ where
 
 impl<C, H, R> MakeService<C> for SyncService<H, R>
 where
-    H: Fn(R, Arc<Request<()>>) -> Response<Body> + Send + Sync + 'static,
+    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + Clone + 'static,
     R: FromRequest + Send + 'static,
     R::Context: Clone,
 {
     type ReqBody = Body;
     type ResBody = Body;
-    type Error = BoxedError;
+    type Error = R::Error;
     type Service = Self;
     type Future = FutureResult<Self, BoxedError>;
     type MakeError = BoxedError;
@@ -373,14 +371,14 @@ where
 
 impl<H, R> Service for SyncService<H, R>
 where
-    H: Fn(R, Arc<Request<()>>) -> Response<Body> + Send + Sync + 'static,
+    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + Clone + 'static,
     R: FromRequest + Send + 'static,
     R::Context: Clone,
 {
     type ReqBody = Body;
     type ResBody = Body;
-    type Error = BoxedError;
-    type Future = DefaultFuture<Response<Body>, BoxedError>;
+    type Error = R::Error;
+    type Future = DefaultFuture<Response<Body>, R::Error>;
 
     fn call(&mut self, req: Request<Self::ReqBody>) -> Self::Future {
         let is_head = req.method() == Method::HEAD;
@@ -392,22 +390,21 @@ where
         let fut = R::from_request_and_body(&req, body, self.context.clone())
             .and_then(move |route| {
                 // Run the sync handler on the blocking thread pool.
-                crate::blocking(move || Ok(handler(route, req)))
+                crate::blocking(move || (handler)(route, req)).map_err(FromRequestError::Custom)
             })
             .map(move |response| {
                 if is_head {
                     // Responses to HEAD requests must have an empty body
                     response.map(|_| Body::empty())
                 } else {
-                    response
+                    response.map(|body| body.into())
                 }
             })
-            .or_else(|err| {
-                if let Some(our_error) = err.downcast_ref::<Error>() {
+            .or_else(|err| match err {
+                FromRequestError::BuildIn(our_error) => {
                     Ok(our_error.response().map(|()| Body::empty()))
-                } else {
-                    Err(err)
                 }
+                FromRequestError::Custom(err) => Err(err),
             });
 
         Box::new(fut)
@@ -416,7 +413,7 @@ where
 
 impl<H, R> fmt::Debug for SyncService<H, R>
 where
-    H: Fn(R, Arc<Request<()>>) -> Response<Body> + Send + Sync + 'static,
+    H: Fn(R, Arc<Request<()>>) -> Result<Response<Body>, R::Error> + Send + Sync + Clone + 'static,
     R: FromRequest + Send + 'static,
     R::Context: Clone + fmt::Debug,
 {

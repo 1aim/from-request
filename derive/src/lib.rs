@@ -20,7 +20,7 @@ use request_context::derive_request_context;
 decl_derive!([FromRequest, attributes(
     // Attributes need to be kept in sync with from_request/parse.rs
 
-    context, body, forward, query_params,
+    context, error, body, forward, query_params,
 
     // We support all HTTP verbs from RFC 7231 as well as PATCH
     get, head, post, put, delete, connect, options, trace, patch
