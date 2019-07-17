@@ -6,8 +6,8 @@ struct MyGuard;
 
 impl Guard for MyGuard {
     type Context = NoContext;
-
-    type Result = Result<Self, BoxedError>;
+    type Error = NoCustomError;
+    type Result = Result<Self, Self::Error>;
 
     fn from_request(_request: &Arc<Request<()>>, _context: &Self::Context) -> Self::Result {
         Ok(MyGuard)

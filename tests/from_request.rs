@@ -2,23 +2,26 @@ use hyperdrive::{
     body::Json,
     http::{Method, Request, StatusCode},
     hyper::Body,
-    BoxedError, Error, ErrorKind, FromRequest, Guard, NoContext, RequestContext,
+    BoxedError, BuildInErrorKind, FromRequest, FromRequestError, Guard, NoContext, NoCustomError,
+    RequestContext,
 };
 use serde::Deserialize;
-use std::str::FromStr;
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 /// Simulates receiving `request`, and decodes a `FromRequest` implementor `T`.
 ///
 /// `T` has to take a `NoContext`.
-fn invoke<T>(request: Request<Body>) -> Result<T, BoxedError>
+fn invoke<T>(request: Request<Body>) -> Result<T, FromRequestError<T::Error>>
 where
     T: FromRequest<Context = NoContext>,
 {
     T::from_request_sync(request, NoContext)
 }
 
-fn invoke_with<T>(request: Request<Body>, context: T::Context) -> Result<T, BoxedError>
+fn invoke_with<T>(
+    request: Request<Body>,
+    context: T::Context,
+) -> Result<T, FromRequestError<T::Error>>
 where
     T: FromRequest,
 {
@@ -30,8 +33,8 @@ struct MyGuard;
 
 impl Guard for MyGuard {
     type Context = NoContext;
-
-    type Result = Result<Self, BoxedError>;
+    type Error = NoCustomError;
+    type Result = Result<Self, Self::Error>;
 
     fn from_request(_request: &Arc<http::Request<()>>, _context: &Self::Context) -> Self::Result {
         Ok(MyGuard)
@@ -113,24 +116,24 @@ fn user_app() {
     }
 
     let get_login = invoke::<Routes>(Request::get("/login").body(Body::empty()).unwrap());
-    let error: Box<Error> = get_login.unwrap_err().downcast().unwrap();
-    assert_eq!(error.kind(), ErrorKind::WrongMethod);
+    let error = get_login.unwrap_err().into_build_in().unwrap();
+    assert_eq!(error.kind(), BuildInErrorKind::WrongMethod);
     assert_eq!(
         error.allowed_methods().expect("allowed_methods()"),
         &[&Method::POST]
     );
 
     let post_user = invoke::<Routes>(Request::post("/users/0").body(Body::empty()).unwrap());
-    let error: Box<Error> = post_user.unwrap_err().downcast().unwrap();
-    assert_eq!(error.kind(), ErrorKind::WrongMethod);
+    let error = post_user.unwrap_err().into_build_in().unwrap();
+    assert_eq!(error.kind(), BuildInErrorKind::WrongMethod);
     assert_eq!(
         error.allowed_methods().expect("allowed_methods()"),
         &[&Method::GET, &Method::PATCH, &Method::HEAD]
     );
 
     let user = invoke::<Routes>(Request::get("/users/wrong").body(Body::empty()).unwrap());
-    let error: Box<Error> = user.unwrap_err().downcast().unwrap();
-    assert_eq!(error.kind(), ErrorKind::PathSegment);
+    let error = user.unwrap_err().into_build_in().unwrap();
+    assert_eq!(error.kind(), BuildInErrorKind::PathSegment);
     assert_eq!(error.http_status(), StatusCode::NOT_FOUND);
 }
 
@@ -160,7 +163,8 @@ fn context() {
     impl Guard for SpecialGuard {
         type Context = SpecialContext;
 
-        type Result = Result<Self, BoxedError>;
+        type Error = NoCustomError;
+        type Result = Result<Self, Self::Error>;
 
         fn from_request(
             _request: &Arc<http::Request<()>>,
@@ -202,8 +206,8 @@ fn struct_context() {
 
     impl Guard for SpecialGuard {
         type Context = SpecialContext;
-
-        type Result = Result<Self, BoxedError>;
+        type Error = NoCustomError;
+        type Result = Result<Self, Self::Error>;
 
         fn from_request(
             _request: &Arc<http::Request<()>>,
@@ -426,7 +430,8 @@ fn generic() {
 
     impl Guard for SpecialGuard {
         type Context = SpecialContext;
-        type Result = Result<Self, BoxedError>;
+        type Error = NoCustomError;
+        type Result = Result<Self, Self::Error>;
 
         fn from_request(_request: &Arc<Request<()>>, _context: &Self::Context) -> Self::Result {
             Ok(SpecialGuard)
@@ -622,22 +627,21 @@ fn forward_allowed_methods() {
         }
     }
 
-    let err: Box<Error> = invoke::<Wrapper>(Request::get("/post").body(Body::empty()).unwrap())
+    let err = invoke::<Wrapper>(Request::get("/post").body(Body::empty()).unwrap())
         .unwrap_err()
-        .downcast()
+        .into_build_in()
         .unwrap();
-    assert_eq!(err.kind(), ErrorKind::WrongMethod);
+    assert_eq!(err.kind(), BuildInErrorKind::WrongMethod);
     assert_eq!(
         err.allowed_methods().expect("allowed_methods()"),
         &[&Method::POST]
     );
 
-    let err: Box<Error> =
-        invoke::<Wrapper>(Request::post("/customhead").body(Body::empty()).unwrap())
-            .unwrap_err()
-            .downcast()
-            .unwrap();
-    assert_eq!(err.kind(), ErrorKind::WrongMethod);
+    let err = invoke::<Wrapper>(Request::post("/customhead").body(Body::empty()).unwrap())
+        .unwrap_err()
+        .into_build_in()
+        .unwrap();
+    assert_eq!(err.kind(), BuildInErrorKind::WrongMethod);
     assert_eq!(
         err.allowed_methods().expect("allowed_methods()"),
         &[&Method::GET, &Method::HEAD]
@@ -657,11 +661,11 @@ fn forward_allowed_methods() {
     assert_eq!(route, Wrapper::Shared);
 
     // Methods not accepted by either result in `allowed_methods()` being merged together.
-    let err: Box<Error> = invoke::<Wrapper>(Request::put("/shared").body(Body::empty()).unwrap())
+    let err = invoke::<Wrapper>(Request::put("/shared").body(Body::empty()).unwrap())
         .unwrap_err()
-        .downcast()
+        .into_build_in()
         .unwrap();
-    assert_eq!(err.kind(), ErrorKind::WrongMethod);
+    assert_eq!(err.kind(), BuildInErrorKind::WrongMethod);
     assert_eq!(
         err.allowed_methods().expect("allowed_methods()"),
         &[&Method::GET, &Method::HEAD, &Method::POST]
@@ -738,19 +742,18 @@ fn generic_guard_struct() {
         }
     );
 
-    let err: Box<Error> =
+    let err =
         invoke::<Generic<MyGuard, Inner>>(Request::get("/notfound").body(Body::empty()).unwrap())
             .unwrap_err()
-            .downcast()
+            .into_build_in()
             .unwrap();
-    assert_eq!(err.kind(), ErrorKind::NoMatchingRoute);
+    assert_eq!(err.kind(), BuildInErrorKind::NoMatchingRoute);
 
-    let err: Box<Error> =
-        invoke::<Generic<MyGuard, Inner>>(Request::post("/").body(Body::empty()).unwrap())
-            .unwrap_err()
-            .downcast()
-            .unwrap();
-    assert_eq!(err.kind(), ErrorKind::WrongMethod);
+    let err = invoke::<Generic<MyGuard, Inner>>(Request::post("/").body(Body::empty()).unwrap())
+        .unwrap_err()
+        .into_build_in()
+        .unwrap();
+    assert_eq!(err.kind(), BuildInErrorKind::WrongMethod);
 }
 
 #[test]
@@ -768,19 +771,19 @@ fn generic_guard_struct_2() {
         Index,
     }
 
-    let err: Box<Error> =
-        invoke::<Generic<MyGuard>>(Request::get("/notfound").body(Body::empty()).unwrap())
-            .unwrap_err()
-            .downcast()
-            .unwrap();
-    assert_eq!(err.kind(), ErrorKind::NoMatchingRoute);
+    let err = invoke::<Generic<MyGuard>>(Request::get("/notfound").body(Body::empty()).unwrap())
+        .unwrap_err()
+        .into_build_in()
+        .unwrap();
 
-    let err: Box<Error> =
-        invoke::<Generic<MyGuard>>(Request::post("/").body(Body::empty()).unwrap())
-            .unwrap_err()
-            .downcast()
-            .unwrap();
-    assert_eq!(err.kind(), ErrorKind::WrongMethod);
+    assert_eq!(err.kind(), BuildInErrorKind::NoMatchingRoute);
+
+    let err = invoke::<Generic<MyGuard>>(Request::post("/").body(Body::empty()).unwrap())
+        .unwrap_err()
+        .into_build_in()
+        .unwrap();
+
+    assert_eq!(err.kind(), BuildInErrorKind::WrongMethod);
 }
 
 /// Keeps another `Arc` around pointing to the request, while the `#[forward]`ed `from_request` is
@@ -796,7 +799,8 @@ fn klepto_arc() {
 
     impl Guard for MyGuard {
         type Context = NoContext;
-        type Result = Result<Self, BoxedError>;
+        type Error = NoCustomError;
+        type Result = Result<Self, Self::Error>;
 
         fn from_request(request: &Arc<http::Request<()>>, _: &Self::Context) -> Self::Result {
             Ok(MyGuard {

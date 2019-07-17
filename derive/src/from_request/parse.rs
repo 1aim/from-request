@@ -16,7 +16,7 @@ const METHOD_ATTRS: &[&str] = &[
 fn our_attrs() -> impl Iterator<Item = &'static str> {
     METHOD_ATTRS
         .iter()
-        .chain(&["context", "body", "forward", "query_params"])
+        .chain(&["context", "error", "body", "forward", "query_params"])
         .cloned()
 }
 
@@ -35,17 +35,22 @@ fn is_method(name: &Ident) -> bool {
 pub struct ItemData {
     name: Ident,
     context: Option<syn::Type>,
+    error: Option<syn::Type>,
 }
 
 impl ItemData {
     pub fn parse(name: Ident, attrs: &[Attribute], is_struct: bool) -> Self {
         let mut context = None;
+        let mut error = None;
 
         for attr in attrs {
             let name = attr.parse_meta().unwrap().name();
             if name == "context" {
                 let ty = syn::parse2(attr.tts.clone()).expect("#[context] must be given a type");
                 insert("#[context]", &mut context, ty);
+            } else if name == "error" {
+                let ty = syn::parse2(attr.tts.clone()).expect("#[error] must be given a type");
+                insert("#[error]", &mut error, ty);
             } else if known_attr(&name) && !is_struct {
                 panic!(
                     "`#[{}]` is not valid on enums (did you mean to place it on a variant instead?)",
@@ -54,12 +59,20 @@ impl ItemData {
             }
         }
 
-        Self { name, context }
+        Self {
+            name,
+            context,
+            error,
+        }
     }
 
     /// Returns the custom context type (`None` if none was specified).
     pub fn context(&self) -> Option<&syn::Type> {
         self.context.as_ref()
+    }
+
+    pub fn error(&self) -> Option<&syn::Type> {
+        self.error.as_ref()
     }
 }
 

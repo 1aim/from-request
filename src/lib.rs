@@ -70,10 +70,10 @@
 //!         // This closure can block freely, and has to return a `Response<Body>`
 //!         match route {
 //!             Route::Index => {
-//!                 Response::new(Body::from("Hello World!"))
+//!                 Ok(Response::new(Body::from("Hello World!")))
 //!             },
 //!             Route::UserInfo { id } => {
-//!                 Response::new(Body::from(format!("User #{}", id)))
+//!                 Ok(Response::new(Body::from(format!("User #{}", id))))
 //!             }
 //!         }
 //!     }));
@@ -86,7 +86,7 @@
 //! ```
 //! use hyper::{Request, Response, Body, Method, service::Service};
 //! use futures::Future;
-//! use hyperdrive::{FromRequest, DefaultFuture, BoxedError, NoContext};
+//! use hyperdrive::{FromRequest, FromRequestError, DefaultFuture, NoCustomError, NoContext};
 //!
 //! #[derive(FromRequest)]
 //! enum Route {
@@ -103,8 +103,8 @@
 //! impl Service for MyService {
 //!     type ReqBody = Body;
 //!     type ResBody = Body;
-//!     type Error = BoxedError;
-//!     type Future = DefaultFuture<Response<Body>, BoxedError>;
+//!     type Error = NoCustomError;
+//!     type Future = DefaultFuture<Response<Body>, Self::Error>;
 //!
 //!     fn call(&mut self, req: Request<Body>) -> Self::Future {
 //!         let is_head = req.method() == Method::HEAD;
@@ -121,6 +121,11 @@
 //!                 resp.map(|_| Body::empty())
 //!             } else {
 //!                 resp
+//!             }
+//!         }).or_else(move |err| match err {
+//!             FromRequestError::Custom(err) => Err(err),
+//!             FromRequestError::BuildIn(err) => {
+//!                 Ok(err.response().map(|_| Body::empty()))
 //!             }
 //!         });
 //!
@@ -168,7 +173,7 @@ pub use {lazy_static::lazy_static, regex};
 
 use doc_comment::doctest;
 use futures::{Future, IntoFuture};
-use std::sync::Arc;
+use std::{error::Error as StdError, sync::Arc};
 use tokio::runtime::current_thread::Runtime;
 
 doctest!("../README.md");
@@ -227,15 +232,23 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// JSON body.
 ///
 /// The generated `FromRequest` implementation will always use
-/// [`DefaultFuture<Self, BoxedError>`][`DefaultFuture`] as the associated
-/// `Result` type.
+/// [`DefaultFuture<Self, Self::Error>`][`DefaultFuture`] as the associated
+/// `Result` type and [`NoCustomError`] as `Error` type.
+///
+/// **Be aware that any custom error is a `hyper::Service` error and as such
+/// is handled by hyper by dropping the connection. To have custom error
+/// handling you have to wrap the created `hyper::Service` (e.g. wrap the
+/// result of [`SyncService::new`])**
 ///
 /// Note that the generated implementation will make use of `.and_then()` to
 /// chain asynchronous operations instead of running them in parallel using
 /// `join_all`. This is because it simplifies the code and doesn't require
 /// making use of boxed futures everywhere in the generated code. Multiple
 /// requests will still be handled in parallel, so this should not negatively
-/// affect performance.
+/// affect performance. Note that the only operations which could be executed
+/// in parallel are the creations of all `Guard` instances (and maybe the
+/// `FromBody` instance). Because of this for many routes this is an irrelevant
+/// implementation detail.
 ///
 /// In order to keep the implementation simple and user code more easily
 /// understandable, overlapping paths are not allowed (unless the paths are
@@ -392,7 +405,7 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 ///
 /// ```
 /// use hyperdrive::{FromRequest, Guard};
-/// # use hyperdrive::{BoxedError, NoContext};
+/// # use hyperdrive::{NoContext, NoCustomError};
 /// # use std::sync::Arc;
 ///
 /// struct User {
@@ -403,8 +416,9 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// impl Guard for User {
 ///     // (omitted for brevity)
 /// #     type Context = NoContext;
-/// #     type Result = Result<Self, BoxedError>;
-/// #     fn from_request(_: &Arc<http::Request<()>>, _: &NoContext) -> Result<Self, BoxedError> {
+/// #     type Error = NoCustomError;
+/// #     type Result = Result<Self, Self::Error>;
+/// #     fn from_request(_: &Arc<http::Request<()>>, _: &NoContext) -> Self::Result {
 /// #         User { id: 0 }.id;
 /// #         Ok(User { id: 0 })
 /// #     }
@@ -445,15 +459,16 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 ///
 /// ```
 /// use hyperdrive::{FromRequest, Guard};
-/// # use hyperdrive::{NoContext, BoxedError};
+/// # use hyperdrive::{NoContext, NoCustomError};
 /// # use std::sync::Arc;
 ///
 /// struct User;
 /// impl Guard for User {
 ///     // (omitted for brevity)
 /// #     type Context = NoContext;
-/// #     type Result = Result<Self, BoxedError>;
-/// #     fn from_request(_: &Arc<http::Request<()>>, _: &NoContext) -> Result<Self, BoxedError> {
+/// #     type Error = NoCustomError;
+/// #     type Result = Result<Self, Self::Error>;
+/// #     fn from_request(_: &Arc<http::Request<()>>, _: &NoContext) -> Self::Result {
 /// #         Ok(User)
 /// #     }
 /// }
@@ -495,6 +510,7 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 ///
 /// [`AsyncService`]: service/struct.AsyncService.html
 /// [`SyncService`]: service/struct.SyncService.html
+/// [`SyncService::new`]: service/struct.SyncService.html#method.new
 /// [`FromBody`]: trait.FromBody.html
 /// [`RequestContext`]: trait.RequestContext.html
 /// [`Guard`]: trait.Guard.html
@@ -502,6 +518,7 @@ pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 /// [`DefaultFuture`]: type.DefaultFuture.html
 /// [`body`]: body/index.html
 /// [`from_request`]: #tymethod.from_request
+/// [`NoCustomError`]: type.NoCustomError.html
 pub trait FromRequest: Sized {
     /// A context parameter passed to [`from_request`].
     ///
@@ -517,17 +534,49 @@ pub trait FromRequest: Sized {
     /// [`RequestContext`]: trait.RequestContext.html
     type Context: RequestContext;
 
+    /// Custom error used for this `FromRequest` implementation.
+    ///
+    /// This allows returning custom error types from [`Guard`] and [`FromBody`]
+    /// implementations as well as from the rout handling function.
+    ///
+    /// **Be aware that hyper by default doesn't handle errors returned by
+    /// a services. It will just _drop_ the connection and not log anything.**
+    /// While this might seem strange it is a good default for any `hyper::Error`
+    /// as they indicate that the connection was messed up by external factors (e.g.
+    /// the client physically disconnected or starts sending random bytes). If you
+    /// want to custom handle some errors you need to wrap the `Service`.
+    ///
+    /// If `FromRequest` is derived then any guard, body as forwarding type
+    /// as well as the route handling function need to have an error type,
+    /// which can be converted into this error type using `Into`.
+    ///
+    /// To use a custom error with the `FromRequestDerive` use the
+    /// `error` attribute on the type in a similar way to how the
+    /// `context` attribute is used.
+    ///
+    /// The default value for this is [`NoCustomError`]. This should also
+    /// be used in the case your rout handling function (or guards etc.) do
+    /// not produce any (additional) errors.
+    ///
+    /// The error needs to implement `From<hyper::Error>` as hyper errors can
+    /// always be produced by parsing the request (including it's body).
+    ///
+    /// [`NoCustomError`]: type.NoCustomError.html
+    /// [`Guard`]: trait.Guard.html
+    /// [`FromBody`]: trait.FromBody.html
+    type Error: StdError + From<hyper::Error> + Send + Sync + 'static;
+
     /// The future returned by [`from_request`].
     ///
     /// Because `impl Trait` cannot be used inside traits (and named
     /// existential types aren't yet stable), the type here might not be
     /// nameable. In that case, you can set it to
-    /// [`DefaultFuture<Self, BoxedError>`][`DefaultFuture`] and box the
+    /// [`DefaultFuture<Self, Self::Error>`][`DefaultFuture`] and box the
     /// returned future.
     ///
     /// [`DefaultFuture`]: type.DefaultFuture.html
     /// [`from_request`]: #tymethod.from_request
-    type Future: Future<Item = Self, Error = BoxedError> + Send;
+    type Future: Future<Item = Self, Error = FromRequestError<Self::Error>> + Send;
 
     /// Creates a `Self` from an HTTP request, asynchronously.
     ///
@@ -592,7 +641,7 @@ pub trait FromRequest: Sized {
     fn from_request_sync(
         request: http::Request<hyper::Body>,
         context: Self::Context,
-    ) -> Result<Self, BoxedError> {
+    ) -> Result<Self, FromRequestError<Self::Error>> {
         let mut rt = Runtime::new().expect("couldn't start single-threaded tokio runtime");
         rt.block_on(Self::from_request(request, context).into_future())
     }
@@ -609,7 +658,10 @@ pub trait FromRequest: Sized {
 ///
 /// # Examples
 ///
-/// Define a guard that ensures that required request headers are present:
+/// Define a guard that ensures that required request headers are present (
+/// be aware that without custom error handling this errors with not result
+/// into a proper HTTP response. Custom error handling can be done e.g. by
+/// wrapping the service the `Guard` is used in):
 ///
 /// ```
 /// # use hyperdrive::{Guard, NoContext, BoxedError};
@@ -618,7 +670,8 @@ pub trait FromRequest: Sized {
 ///
 /// impl Guard for MustFrobnicate {
 ///     type Context = NoContext;
-///     type Result = Result<Self, BoxedError>;
+///     type Error = BoxedError;
+///     type Result = Result<Self, Self::Error>;
 ///
 ///     fn from_request(request: &Arc<http::Request<()>>, context: &Self::Context) -> Self::Result {
 ///         if request.headers().contains_key("X-Frobnicate") {
@@ -632,7 +685,9 @@ pub trait FromRequest: Sized {
 /// ```
 ///
 /// Use server settings stored in a [`RequestContext`] to exclude certain user
-/// agents:
+/// agents (be aware that without a proper custom error handling this will _not_
+/// send back a proper error response, custom error handling can be done e.g. by
+/// wrapping the service the guard is used in):
 ///
 /// ```
 /// # use hyperdrive::{Guard, RequestContext, BoxedError};
@@ -646,7 +701,8 @@ pub trait FromRequest: Sized {
 ///
 /// impl Guard for RejectForbiddenAgents {
 ///     type Context = ForbiddenAgents;
-///     type Result = Result<Self, BoxedError>;
+///     type Error = BoxedError;
+///     type Result = Result<Self, Self::Error>;
 ///
 ///     fn from_request(request: &Arc<http::Request<()>>, context: &Self::Context) -> Self::Result {
 ///         let agent = request.headers().get("User-Agent")
@@ -676,21 +732,42 @@ pub trait Guard: Sized {
     /// [`NoContext`]: struct.NoContext.html
     type Context: RequestContext;
 
+    /// Error returned when this guard fails.
+    ///
+    /// This error type needs to be convertible into any [`FromRequest::Error`]
+    /// of a [`FromRequest`] implementation it is used in (using `Into`).
+    ///
+    /// Because of this it is recommended to make sure it has following bounds:
+    ///
+    /// `Error: std::error::Error + Send + Sync + 'static`
+    ///
+    /// Be aware that custom guard errors are turned into custom `FromRequest`
+    /// errors, which are returned as hyper `Service` errors. Which might not
+    /// be handled in the way you expect (See [`FromRequest::Error`]'s
+    /// documentation for more details).
+    ///
+    /// If you do not need a custom error type use [`NoCustomError`].
+    ///
+    /// [`NoCustomError`]: type.NoCustomError.html
+    /// [`FromRequest`]: trait.FromRequest.html
+    /// [`FromRequest::Error`]: trait.FromRequest.html#associatedtype.Error
+    type Error: Send + 'static;
+
     /// The result returned by [`Guard::from_request`].
     ///
     /// Because `impl Trait` cannot be used inside traits (and named
     /// existential types aren't stable), the type here might not be
     /// nameable. In that case, you can set it to
-    /// [`DefaultFuture<Self, Error>`][`DefaultFuture`] and box the returned
+    /// [`DefaultFuture<Self, Self::Error>`][`DefaultFuture`] and box the returned
     /// future.
     ///
     /// If your guard doesn't need to return a future (eg. because it's just a
-    /// parsing step), you can set this to `Result<Self, BoxedError>` and
+    /// parsing step), you can set this to `Result<Self, Self::Error>` and
     /// immediately return the result of the conversion.
     ///
     /// [`Guard::from_request`]: #tymethod.from_request
     /// [`DefaultFuture`]: type.DefaultFuture.html
-    type Result: IntoFuture<Item = Self, Error = BoxedError>;
+    type Result: IntoFuture<Item = Self, Error = Self::Error>;
 
     /// Create an instance of this type from HTTP request data, asynchronously.
     ///
@@ -724,7 +801,7 @@ pub trait Guard: Sized {
 /// crate `serde_whatever`:
 ///
 /// ```
-/// # use hyperdrive::{FromBody, NoContext, DefaultFuture, BoxedError};
+/// # use hyperdrive::{FromBody, NoContext, DefaultFuture, FromRequestError, NoCustomError};
 /// # use futures::prelude::*;
 /// # use serde_json as serde_whatever;
 /// # use std::sync::Arc;
@@ -732,19 +809,30 @@ pub trait Guard: Sized {
 ///
 /// impl<T: serde::de::DeserializeOwned + Send + 'static> FromBody for CustomFormat<T> {
 ///     type Context = NoContext;
-///     type Result = DefaultFuture<Self, BoxedError>;
+///     type Error = NoCustomError;
+///     type Result = DefaultFuture<Self, FromRequestError<Self::Error>>;
 ///
 ///     fn from_body(
 ///         request: &Arc<http::Request<()>>,
 ///         body: hyper::Body,
 ///         context: &Self::Context,
 ///     ) -> Self::Result {
-///         Box::new(body.concat2().map_err(Into::into).and_then(|body| {
+///         // The `concat2()` can return a hyper::Error which is handled by
+///         // the custom error type (here `NoCustomError`).
+///         let res = body.concat2().map_err(FromRequestError::hyper_error).and_then(|body| {
 ///             match serde_whatever::from_slice(&body) {
 ///                 Ok(t) => Ok(CustomFormat(t)),
-///                 Err(e) => Err(e.into()),
+///                 Err(e) => {
+///                     // The `BuildInError` has a number of useful error variants,
+///                     // which allow you to not use a custom error, which also would
+///                     // require custom error handling by e.g. wrapping services this
+///                     // body is used in.
+///                     Err(FromRequestError::malformed_body(e))
+///                 },
 ///             }
-///         }))
+///         });
+///
+///         Box::new(res)
 ///     }
 /// }
 /// ```
@@ -753,14 +841,15 @@ pub trait Guard: Sized {
 /// the bytes:
 ///
 /// ```
-/// # use hyperdrive::{FromBody, NoContext, DefaultFuture, BoxedError};
+/// # use hyperdrive::{FromBody, NoContext, DefaultFuture, NoCustomError, FromRequestError};
 /// # use futures::prelude::*;
 /// # use std::sync::Arc;
 /// struct BodyChecksum(u8);
 ///
 /// impl FromBody for BodyChecksum {
 ///     type Context = NoContext;
-///     type Result = DefaultFuture<Self, BoxedError>;
+///     type Error = NoCustomError;
+///     type Result = DefaultFuture<Self, FromRequestError<Self::Error>>;
 ///
 ///     fn from_body(
 ///         request: &Arc<http::Request<()>>,
@@ -768,8 +857,8 @@ pub trait Guard: Sized {
 ///         context: &Self::Context,
 ///     ) -> Self::Result {
 ///         Box::new(body
-///             .map_err(BoxedError::from)
-///             .fold(0, |checksum, chunk| -> Result<_, BoxedError> {
+///             .map_err(FromRequestError::hyper_error)
+///             .fold(0, |checksum, chunk| -> Result<_, FromRequestError<_>> {
 ///                 Ok(chunk.as_ref().iter()
 ///                     .fold(checksum, |checksum: u8, byte| {
 ///                         checksum.wrapping_add(*byte)
@@ -794,21 +883,45 @@ pub trait FromBody: Sized {
     /// [`NoContext`]: struct.NoContext.html
     type Context: RequestContext;
 
+    /// Error returned when the creation of a body using `FromBody` fails.
+    ///
+    /// This error needs to be convertible to the [`FromRequest::Error`] type
+    /// of the routing struct this body type is used in (using `Into`).
+    ///
+    /// If your body implementation can not fail, or only fails if there is
+    /// a `hyper::Error` use [`NoCustomError`].
+    ///
+    /// Due to the fact that it this error type needs to be convertible to
+    /// [`FromRequest::Error`]'s for [`FromRequest`] implementations it is used
+    /// in it's recommended to make sure it has following bounds:
+    ///
+    /// `Error: std::error::Error + Send + Sync + 'static`
+    ///
+    /// Be aware that custom guard errors are turned into custom [`FromRequest`]
+    /// errors, which are returned as hyper `Service` errors. Which might not
+    /// be handled in the way you expect (See [`FromRequest::Error`]'s
+    /// documentation for more details).
+    ///
+    /// [`FromRequest`]: trait.FromRequest.html
+    /// [`FromRequest::Error`]: trait.FromRequest.html#associatedtype.Error
+    /// [`NoCustomError`]: type.NoCustomError.html
+    type Error: Send + 'static;
+
     /// The result returned by [`from_body`].
     ///
     /// Because `impl Trait` cannot be used inside traits (and named
     /// existential types aren't stable), the type here might not be
     /// nameable. In that case, you can set it to
-    /// [`DefaultFuture<Self, Error>`][`DefaultFuture`] and box the returned
+    /// [`DefaultFuture<Self, Self::Error>`][`DefaultFuture`] and box the returned
     /// future.
     ///
     /// If your `FromBody` implementation doesn't need to return a future, you
-    /// can set this to `Result<Self, BoxedError>` and immediately return the
+    /// can set this to `Result<Self, Self::Error>` and immediately return the
     /// result of the conversion.
     ///
     /// [`DefaultFuture`]: type.DefaultFuture.html
     /// [`from_body`]: #tymethod.from_body
-    type Result: IntoFuture<Item = Self, Error = BoxedError>;
+    type Result: IntoFuture<Item = Self, Error = FromRequestError<Self::Error>>;
 
     /// Create an instance of this type from an HTTP request body,
     /// asynchronously.

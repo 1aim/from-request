@@ -70,8 +70,9 @@ mod parse;
 
 use self::parse::{FieldKind, ItemData, PathMap, VariantData};
 use proc_macro2::{Ident, Span, TokenStream};
-use quote::{quote, ToTokens};
+use quote::quote;
 use std::iter::{self, FromIterator};
+use syn::Type;
 use synstructure::{AddBounds, Structure, VariantInfo};
 
 pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
@@ -88,6 +89,10 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
 
     let context = item_data.context().cloned().unwrap_or_else(|| {
         syn::parse_str("NoContext").expect("internal error: couldn't parse type")
+    });
+
+    let error_type = item_data.error().cloned().unwrap_or_else(|| {
+        syn::parse_str("NoCustomError").expect("internal error: couldn't parse type")
     });
 
     let variant_data = s
@@ -278,13 +283,13 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
                                 *tmp_request.uri_mut() = request.uri().clone();
 
                                 let future = #construct;
-                                let future = future.map_err(move |mut e| {
-                                    use hyperdrive::{Error, ErrorKind};
+                                let future = future.map_err(move |mut err| {
+                                    use hyperdrive::{FromRequestError, BuildInErrorKind};
 
                                     // If the #[forward]ed impl also failed with "wrong_method", add
                                     // our accepted methods to it.
-                                    if let Some(err) = e.downcast_mut::<Error>() {
-                                        if err.kind() == ErrorKind::WrongMethod {
+                                    if let FromRequestError::BuildIn(err) = err {
+                                        if err.kind() == BuildInErrorKind::WrongMethod {
                                             let request = tmp_request;
                                             let mut our_methods = Vec::from(#find_accepted_methods);
                                             let inner_methods = err.allowed_methods()
@@ -292,12 +297,12 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
 
                                             our_methods.extend(inner_methods);
 
-                                            Box::new(Error::wrong_method(Vec::from(our_methods)))
+                                            FromRequestError::wrong_method(Vec::from(our_methods))
                                         } else {
-                                            e
+                                            FromRequestError::BuildIn(err)
                                         }
                                     } else {
-                                        e
+                                        err
                                     }
                                 });
 
@@ -310,8 +315,10 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
                         // and collecting all accepted methods.
                         quote! {
                             (Some(#i), _) => {
+                                use hyperdrive::FromRequestError;
+
                                 let methods = #find_accepted_methods;
-                                return Error::wrong_method(methods).into_future();
+                                return FromRequestError::wrong_method(methods).into_future();
                             }
                         }
                     }
@@ -332,7 +339,8 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
         // No fallback route, add an error arm
         regex_match_arms.push(quote! {
             _ => {
-                return Error::from_kind(ErrorKind::NoMatchingRoute).into_future();
+                return FromRequestError::no_matching_route()
+                    .into_future();
             }
         });
     }
@@ -389,7 +397,7 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
     // Whether the impl is generic over types (ie. has type parameters)
     let is_type_generic = s.ast().generics.type_params().next().is_some();
 
-    let bounds = generate_trait_bounds(&item_data, &variant_data);
+    let bounds = generate_trait_bounds(&variant_data, &context, &error_type);
 
     let where_clause = if !is_type_generic {
         // Don't add where clause if there are no generics
@@ -412,9 +420,9 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
         extern crate hyperdrive;
         use hyperdrive::{
             FromBody, FromRequest, Guard, DefaultFuture, NoContext,
-            ErrorKind, BoxedError, Error,
+            FromRequestError, NoCustomError, BuildInError, BuildInErrorKind,
             http, hyper, lazy_static, regex::{RegexSet, Regex},
-            futures::{IntoFuture, Future},
+            futures::{IntoFuture, Future}
         };
         // Make sure `.as_ref()` always refers to the `AsRef` trait in libstd.
         // Otherwise the calling crate could override this.
@@ -422,8 +430,11 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
         use core::str::FromStr;
         use std::sync::Arc;
 
-        gen impl<#(#impl_generics),*> FromRequest for @Self #where_clause {
-            type Future = DefaultFuture<Self, BoxedError>;
+        gen impl<#(#impl_generics),*> FromRequest for @Self
+            #where_clause
+        {
+            type Future = DefaultFuture<Self, FromRequestError<Self::Error>>;
+            type Error = #error_type;
             type Context = #context;
 
             fn from_request_and_body(
@@ -498,28 +509,8 @@ impl FromIterator<Bounds> for Bounds {
     }
 }
 
-fn generate_trait_bounds(item: &ItemData, variants: &[VariantData]) -> Bounds {
-    let context = item
-        .context()
-        .map(|c| c.into_token_stream())
-        .unwrap_or_else(|| quote!(::hyperdrive::NoContext));
-
-    let mut ty_param_counter = 0;
-    let mut ty_params = Vec::new();
-
-    // Creates a unique type parameter containing the given name, and adds it to the returned
-    // `Bounds`
-    let mut mkty = |name| -> Ident {
-        let ident = Ident::new(
-            &format!("_hyperdrive_{}_{}", name, ty_param_counter),
-            Span::call_site(),
-        );
-        ty_param_counter += 1;
-        ty_params.push(ident.clone());
-        ident
-    };
-
-    let mut bounds: Bounds = variants
+fn generate_trait_bounds(variants: &[VariantData], context: &Type, error_type: &Type) -> Bounds {
+    let bounds: Bounds = variants
         .iter()
         .flat_map(|v| v.field_uses())
         .map(|(field, field_kind)| {
@@ -545,82 +536,68 @@ fn generate_trait_bounds(item: &ItemData, variants: &[VariantData]) -> Bounds {
                     )],
                 },
                 FieldKind::Body => {
-                    let frombody_context = mkty("FromBody_Context");
-                    let frombody_result = mkty("FromBody_Result");
-                    let frombody_result_future = mkty("FromBody_Result_Future");
+                    // let frombody_context = mkty("FromBody_Context");
+                    // let frombody_result = mkty("FromBody_Result");
+                    // let frombody_result_future = mkty("FromBody_Result_Future");
                     Bounds {
                         addl_ty_params: Vec::new(),
                         impl_bounds: vec![
                             quote!( #ty:
-                                ::hyperdrive::FromBody<
-                                    Context=#frombody_context,
-                                    Result=#frombody_result,
-                                > +
-                                ::std::marker::Send +
+                                ::hyperdrive::FromBody +
+                                std::marker::Send +
                                 'static
                             ),
-                            quote!( #context: AsRef<#frombody_context> ),
-                            // better implied bounds plz
-                            quote!( #frombody_context:
-                                ::hyperdrive::RequestContext
+                            quote!( #context:
+                                AsRef<<#ty as ::hyperdrive::FromBody>::Context>
                             ),
-                            quote!( #frombody_result:
-                                ::hyperdrive::futures::IntoFuture<
-                                    Item=#ty,
-                                    Error=::hyperdrive::BoxedError,
-                                    Future=#frombody_result_future,
-                                > +
-                                ::std::marker::Send +
-                                'static
+                            quote!(
+                                <#ty as ::hyperdrive::FromBody>::Context:
+                                    ::hyperdrive::RequestContext
                             ),
-                            quote!( #frombody_result_future:
-                                ::hyperdrive::futures::Future<
-                                    Item=#ty,
-                                    Error=::hyperdrive::BoxedError,
-                                > +
-                                ::std::marker::Send +
-                                'static
+                            quote!(
+                                <#ty as ::hyperdrive::FromBody>::Error:
+                                    Into<#error_type>
                             ),
+                            quote!(
+                                <#ty as ::hyperdrive::FromBody>::Result:
+                                    ::std::marker::Send +
+                                    'static
+                            ),
+                            quote!(
+                                <<#ty as ::hyperdrive::FromBody>::Result as
+                                    ::hyperdrive::futures::IntoFuture>::Future:
+                                        ::std::marker::Send +
+                                        'static
+                            )
                         ],
                     }
                 },
                 FieldKind::Guard => {
-                    let guard_context = mkty("Guard_Context");
-                    let guard_result = mkty("Guard_Result");
-                    let guard_result_future = mkty("Guard_Result_Future");
                     Bounds {
                         addl_ty_params: Vec::new(),
                         impl_bounds: vec![
                             quote!( #ty:
-                                ::hyperdrive::Guard<
-                                    Context=#guard_context,
-                                    Result=#guard_result,
-                                > +
-                                ::std::marker::Send +
+                                ::hyperdrive::Guard +
+                                std::marker::Send +
                                 'static
                             ),
-                            quote!( #context: AsRef<#guard_context> ),
-                            // better implied bounds plz
-                            quote!( #guard_context:
+                            quote!( #context: AsRef<<#ty as ::hyperdrive::Guard>::Context> ),
+                            quote!( <#ty as ::hyperdrive::Guard>::Context:
                                 ::hyperdrive::RequestContext
                             ),
-                            quote!( #guard_result:
-                                ::hyperdrive::futures::IntoFuture<
-                                    Item=#ty,
-                                    Error=::hyperdrive::BoxedError,
-                                    Future=#guard_result_future,
-                                > +
+                            quote!( <#ty as ::hyperdrive::Guard>::Result:
                                 ::std::marker::Send +
                                 'static
                             ),
-                            quote!( #guard_result_future:
-                                ::hyperdrive::futures::Future<
-                                    Item=#ty,
-                                    Error=::hyperdrive::BoxedError,
-                                > +
-                                ::std::marker::Send +
-                                'static
+                            quote!(
+                                <<#ty as ::hyperdrive::Guard>::Result as
+                                    ::hyperdrive::futures::IntoFuture>::Future:
+                                        ::std::marker::Send  +
+                                        'static
                             ),
+                            quote!( <#ty as ::hyperdrive::Guard>::Error:
+                                Into<#error_type>
+                            )
                         ],
                     }
                 },
@@ -633,13 +610,15 @@ fn generate_trait_bounds(item: &ItemData, variants: &[VariantData]) -> Bounds {
                             ::std::marker::Send +
                             'static
                         ),
+                        quote!( <#ty as ::hyperdrive::FromRequest>::Error:
+                            Into<#error_type>
+                        )
                     ],
                 },
             }
         })
         .collect();
 
-    bounds.addl_ty_params.extend(ty_params);
     bounds
 }
 
@@ -692,7 +671,10 @@ fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStre
                                 .as_str();
                             let #variable = match <#ty as FromStr>::from_str(#variable) {
                                 Ok(v) => v,
-                                Err(e) => return Error::with_source(ErrorKind::PathSegment, e).into_future(),
+                                Err(e) => {
+                                    let err = BuildInError::with_source(BuildInErrorKind::PathSegment, e);
+                                    return FromRequestError::BuildIn(err).into_future()
+                                },
                             };
                         }
                     })
@@ -725,7 +707,10 @@ fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStre
             let raw_query = request.uri().query().unwrap_or("");
             let #variable = match serde_urlencoded::from_str::<#ty>(raw_query) {
                 Ok(val) => val,
-                Err(e) => return Error::with_source(ErrorKind::QueryParam, e).into_future(),
+                Err(e) => {
+                    let err = BuildInError::with_source(BuildInErrorKind::QueryParam, e);
+                    return FromRequestError::BuildIn(err).into_future();
+                },
             };
         }
     } else {
@@ -745,7 +730,7 @@ fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStre
         Ident::new(&format!("fld_{}", name), Span::call_site())
     });
     let mut future = quote! {
-        Ok(#construct).into_future()
+        Result::Ok(#construct).into_future()
     };
 
     // Read the body
@@ -755,6 +740,7 @@ fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStre
         future = quote! {
             <#ty as FromBody>::from_body(&request, body, context.as_ref())
                 .into_future()
+                .map_err(FromRequestError::convert_custom_error::<Self::Error>)
                 .and_then(move |#var| #future)
         };
     };
@@ -766,6 +752,7 @@ fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStre
         future = quote! {{
             <#ty as FromRequest>::from_request_and_body(&request, body, context)
                 .into_future()
+                .map_err(FromRequestError::convert_custom_error::<Self::Error>)
                 .and_then(move |#var| #future)
         }};
     }
@@ -783,6 +770,7 @@ fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStre
         future = quote! {
             <#ty as Guard>::from_request(&request, context.as_ref())
                 .into_future()
+                .map_err(|err| FromRequestError::Custom(err.into()))
                 .and_then(move |#var| #future)
         };
     }
@@ -797,7 +785,7 @@ fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStre
         let request = Arc::clone(request);
         let future = #future;
 
-        Box::new(future) as DefaultFuture<Self, BoxedError>
+        Box::new(future) as DefaultFuture<Self, FromRequestError<Self::Error>>
     }}
 }
 

@@ -57,7 +57,7 @@ fn main() {
     // If you want to write an async handler, you could use `AsyncService` instead.
     let srv = Server::bind(&"127.0.0.1:0".parse().unwrap())
         .serve(SyncService::new(|route: Route, _| {
-            match route {
+            let response = match route {
                 Route::Index => {
                     Response::new(Body::from("Hello World!"))
                 }
@@ -74,7 +74,9 @@ fn main() {
                             .expect("building response failed")
                     }
                 }
-            }
+            };
+
+            Ok(response)
         }));
 
     let port = srv.local_addr().port();
