@@ -17,10 +17,10 @@ edition = "2018"
 proc-macro = true
 
 [dependencies]
-syn = "0.15.26"
-synstructure = "0.10.1"
-proc-macro2 = "0.4.27"
-quote = "0.6.11"
-regex-syntax = "0.6.5"
-regex = "1.1.0"
+syn = { version = "0.15.39", default-features = false }
+synstructure = { version = "0.11.0", default-features = false }
+proc-macro2 = "0.4.30"
+quote = { version = "0.6.13", default-features = false }
+regex-syntax = "0.6.8"
+regex = "1.1.9"
 indexmap = "1.0.2"
