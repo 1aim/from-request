@@ -153,6 +153,7 @@ TODO:
 
 pub mod body;
 mod error;
+mod readme;
 pub mod service;
 
 pub use error::*;
@@ -166,12 +167,9 @@ pub use {futures, http, hyper, serde};
 #[doc(hidden)]
 pub use {lazy_static::lazy_static, regex};
 
-use doc_comment::doctest;
 use futures::{Future, IntoFuture};
 use std::sync::Arc;
 use tokio::runtime::current_thread::Runtime;
-
-doctest!("../README.md");
 
 /// A default boxed future that may be returned from [`FromRequest`],
 /// [`FromBody`] and [`Guard`] implementations.
