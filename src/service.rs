@@ -1,15 +1,18 @@
 //! Implements hyper `Service` adapters that reduce boilerplate.
 //!
-//! This module contains two implementations of hyper's `Service` trait:
-//! [`AsyncService`] and [`SyncService`]. Both will decode the request for you
-//! and invoke a handler closure.
-//!
-//! If your app doesn't need to be asynchronous, you can use [`SyncService`],
-//! which is an adapter that lets you write blocking and synchronous code that
-//! is run in a separate thread pool.
+//! This module contains adapters for hyper's `Service` trait that make common
+//! operations easier and require less boilerplate:
+//! * [`AsyncService`] and [`SyncService`] can be directly passed to a hyper
+//!   server and will decode incoming requests for you and invoke a handler
+//!   closure. They make it very easy to use any type implementing
+//!   [`FromRequest`] as the main entry point of your app.
+//! * [`ServiceExt`] provides adapter methods on Hyper `Service`s that simplify
+//!   common patterns like catching panics.
 //!
 //! [`AsyncService`]: struct.AsyncService.html
 //! [`SyncService`]: struct.SyncService.html
+//! [`ServiceExt`]: trait.ServiceExt.html
+//! [`FromRequest`]: ../trait.FromRequest.html
 
 use crate::{BoxedError, DefaultFuture, Error, FromRequest, NoContext};
 use futures::{future::FutureResult, Future, IntoFuture};
@@ -17,7 +20,9 @@ use hyper::{
     service::{MakeService, Service},
     Body, Method, Request, Response,
 };
+use std::any::Any;
 use std::fmt;
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::Arc;
 
 /// Asynchronous hyper service adapter.
@@ -40,7 +45,7 @@ use std::sync::Arc;
 ///   the original request. Returns a future resolving to the response to return
 ///   to the client. Shared via `Arc`.
 /// * **`R`**: The request type expected by the handler `H`. Implements
-///   `FromRequest`.
+///   [`FromRequest`].
 /// * **`F`**: The `Future` returned by the handler closure `H`.
 ///
 /// # Examples
@@ -439,5 +444,170 @@ where
             )
             .field("context", &self.context)
             .finish()
+    }
+}
+
+/// Extension trait for types implementing Hyper's `Service` trait.
+///
+/// This adds a number of convenience methods that can be used to build robust
+/// applications with Hyper and Hyperdrive.
+pub trait ServiceExt: Service + Sized {
+    /// Catches any panics that occur in the service `self`, and calls an
+    /// asynchronous panic handler with the panic payload.
+    ///
+    /// The `handler` can decide if and how the request should be answered. A
+    /// common option is to return a `500 Internal Server Error` response to the
+    /// client. If the handler returns an error, the connection will be dropped
+    /// and no response will be sent, which mirrors the behavior of Hyper.
+    ///
+    /// Panics occurring inside of `handler` will not be caught again.
+    ///
+    /// Like `std::panic::catch_unwind`, this only works when the final binary
+    /// is compiled with `panic = unwind` (the default). Using `panic = abort`
+    /// will *always* abort the whole process on any panic and cannot be caught.
+    ///
+    /// **Note**: This mechanism is not very suitable for *logging* panics,
+    /// since no useful backtrace can be constructed and no location information
+    /// is available. The panic hook mechanism in the standard library is better
+    /// suited for that (see `std::panic::set_hook`).
+    fn catch_unwind<H, R>(self, handler: H) -> CatchUnwind<Self, R, H>
+    where
+        Self: Service<ResBody = Body, Error = BoxedError> + Sync,
+        Self::Future: Send,
+        H: Fn(Box<dyn Any + Send>) -> R + Send + Sync + 'static,
+        R: IntoFuture<Item = Response<Body>, Error = BoxedError>,
+        R::Future: Send + 'static;
+
+    /// Creates a type implementing `MakeService` by cloning `self` for every
+    /// incoming connection.
+    ///
+    /// The result of this can be directly passed to Hyper's `Builder::serve`.
+    fn make_service_by_cloning(self) -> MakeServiceByCloning<Self>
+    where
+        Self: Clone;
+}
+
+impl<T: Service> ServiceExt for T {
+    fn catch_unwind<H, R>(self, handler: H) -> CatchUnwind<Self, R, H>
+    where
+        Self: Service<ResBody = Body, Error = BoxedError> + Sync,
+        Self::Future: Send,
+        H: Fn(Box<dyn Any + Send>) -> R + Send + Sync + 'static,
+        R: IntoFuture<Item = Response<Body>, Error = BoxedError>,
+        R::Future: Send + 'static,
+    {
+        CatchUnwind {
+            inner: self,
+            handler: Arc::new(handler),
+        }
+    }
+
+    fn make_service_by_cloning(self) -> MakeServiceByCloning<Self>
+    where
+        Self: Clone,
+    {
+        MakeServiceByCloning { service: self }
+    }
+}
+
+/// A `Service` adapter that catches unwinding panics.
+///
+/// Returned by [`ServiceExt::catch_unwind`].
+///
+/// [`ServiceExt::catch_unwind`]: trait.ServiceExt.html#tymethod.catch_unwind
+#[derive(Debug)]
+pub struct CatchUnwind<S, R, H>
+where
+    S: Service<ResBody = Body, Error = BoxedError> + Sync,
+    S::Future: Send + 'static,
+    R: IntoFuture<Item = Response<Body>, Error = BoxedError>,
+    R::Future: Send + 'static,
+    H: Fn(Box<dyn Any + Send>) -> R + Send + Sync + 'static,
+{
+    inner: S,
+    handler: Arc<H>,
+}
+
+impl<S, R, H> Service for CatchUnwind<S, R, H>
+where
+    S: Service<ResBody = Body, Error = BoxedError> + Sync,
+    S::Future: Send + 'static,
+    R: IntoFuture<Item = Response<Body>, Error = BoxedError>,
+    R::Future: Send + 'static,
+    H: Fn(Box<dyn Any + Send>) -> R + Send + Sync + 'static,
+{
+    type ReqBody = S::ReqBody;
+    type ResBody = Body;
+    type Error = BoxedError;
+    type Future = DefaultFuture<Response<Body>, BoxedError>;
+
+    fn call(&mut self, req: Request<Self::ReqBody>) -> Self::Future {
+        // We need to make sure that we don't just catch panics that happen while *polling* the
+        // inner service's `Future`, but also those that happen when the inner `Future`s are
+        // constructed, which basically means anything happening inside `self.inner.call(..)`.
+
+        let handler = self.handler.clone();
+        let inner_future = match catch_unwind(AssertUnwindSafe(move || self.inner.call(req))) {
+            Ok(future) => future,
+            Err(panic_payload) => return Box::new(handler(panic_payload).into_future()),
+        };
+
+        Box::new(AssertUnwindSafe(inner_future)
+            .catch_unwind()
+            .then(move |panic_result| -> Box<dyn Future<Item=Response<Body>, Error = BoxedError>
+            + Send> {
+                match panic_result {
+                    // FIXME avoid boxing so much here
+                    Ok(result) => Box::new(result.into_future()),
+                    Err(panic_payload) => Box::new(handler(panic_payload).into_future()),
+                }
+            }),
+        )
+    }
+}
+
+impl<S, R, H> Clone for CatchUnwind<S, R, H>
+where
+    S: Service<ResBody = Body, Error = BoxedError> + Clone + Sync,
+    S::Future: Send + 'static,
+    R: IntoFuture<Item = Response<Body>, Error = BoxedError>,
+    R::Future: Send + 'static,
+    H: Fn(Box<dyn Any + Send>) -> R + Send + Sync + 'static,
+{
+    fn clone(&self) -> Self {
+        CatchUnwind {
+            inner: self.inner.clone(),
+            handler: self.handler.clone(),
+        }
+    }
+}
+
+/// Implements Hyper's `MakeService` trait by cloning a service `S` for every
+/// incoming connection.
+///
+/// Both [`SyncService`] and [`AsyncService`] already implement `MakeService`
+/// using the same implementation (cloning themselves), so you don't need this
+/// if you are using either of those directly.
+///
+/// This type is returned by [`ServiceExt::make_service_by_cloning`].
+///
+/// [`SyncService`]: struct.SyncService.html
+/// [`AsyncService`]: struct.AsyncService.html
+/// [`ServiceExt::make_service_by_cloning`]: trait.ServiceExt.html#tymethod.make_service_by_cloning
+#[derive(Debug, Copy, Clone)]
+pub struct MakeServiceByCloning<S: Service + Clone> {
+    service: S,
+}
+
+impl<Ctx, S: Service + Clone> MakeService<Ctx> for MakeServiceByCloning<S> {
+    type ReqBody = S::ReqBody;
+    type ResBody = S::ResBody;
+    type Error = S::Error;
+    type Service = S;
+    type Future = FutureResult<S, Self::MakeError>;
+    type MakeError = BoxedError;
+
+    fn make_service(&mut self, _ctx: Ctx) -> Self::Future {
+        Ok(self.service.clone()).into_future()
     }
 }
