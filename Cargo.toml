@@ -8,7 +8,7 @@ repository = "https://github.com/1aim/hyperdrive.git"
 keywords = ["async", "http", "request", "router", "guard"]
 categories = ["web-programming::http-server", "asynchronous"]
 readme = "README.md"
-license = "CC0-1.0"
+license = "0BSD"
 edition = "2018"
 
 # cargo-release configuration
