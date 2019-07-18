@@ -53,6 +53,6 @@ path = "derive"
 version = "=0.0.2"
 
 [dev-dependencies]
-reqwest = "0.9.17"
+reqwest = { version = "0.9.17", default-features = false }
 
 [workspace]
