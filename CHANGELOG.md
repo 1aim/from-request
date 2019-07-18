@@ -5,8 +5,6 @@
 ### Breaking Changes
 
 * The signature of `from_request` was changed to pass the request differently.
-* Support for dynamic extensions (a feature of the `http` crate) in requests
-  was removed. `Request::extensions` will now return an empty map.
 
 ### New Features
 
