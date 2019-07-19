@@ -9,7 +9,7 @@ You should never use this crate directly. It does not expose a stable API and
 may break at any time. Use `hyperdrive` directly instead.
 """
 documentation = "https://docs.rs/hyperdrive/"
-repository = "https://github.com/1aim/hyperdrive.git"
+repository = "https://github.com/dac-gmbh/hyperdrive.git"
 license = "0BSD"
 edition = "2018"
 
