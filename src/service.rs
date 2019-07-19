@@ -460,16 +460,72 @@ pub trait ServiceExt: Service + Sized {
     /// client. If the handler returns an error, the connection will be dropped
     /// and no response will be sent, which mirrors the behavior of Hyper.
     ///
-    /// Panics occurring inside of `handler` will not be caught again.
+    /// **Note**: Panics occurring inside of `handler` will not be caught again.
+    /// The behavior in this case depends on the futures executor in use. When
+    /// using tokio, it will catch the panic in the worker thread and recover.
+    /// The connection to the client will be dropped.
     ///
-    /// Like `std::panic::catch_unwind`, this only works when the final binary
-    /// is compiled with `panic = unwind` (the default). Using `panic = abort`
-    /// will *always* abort the whole process on any panic and cannot be caught.
+    /// **Note**: Like `std::panic::catch_unwind`, this only works when the
+    /// final binary is compiled with `panic = unwind` (the default). Using
+    /// `panic = abort` will *always* abort the whole process on any panic and
+    /// cannot be caught.
     ///
     /// **Note**: This mechanism is not very suitable for *logging* panics,
     /// since no useful backtrace can be constructed and no location information
     /// is available. The panic hook mechanism in the standard library is better
     /// suited for that (see `std::panic::set_hook`).
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use hyperdrive::{FromRequest, service::*};
+    /// use hyper::{Body, Server, Response};
+    /// use futures::Future;
+    /// use http::StatusCode;
+    ///
+    /// #[derive(FromRequest)]
+    /// enum Routes {
+    ///     #[get("/")]
+    ///     Panic,
+    /// }
+    ///
+    /// let service = SyncService::new(|route: Routes, orig_request| {
+    ///     match route {
+    ///         Routes::Panic => panic!("Oops, something went wrong!"),
+    ///     }
+    /// }).catch_unwind(|panic_payload| {
+    ///     // We ignore the payload here. We could also downcast it to `String`/`&'static str`
+    ///     // and include it in the response.
+    ///     let _ = panic_payload;
+    ///
+    ///     let message = r#"
+    ///         <!DOCTYPE html>
+    ///         <html>
+    ///         <body>
+    ///             <h1>Internal Server Error</h1>
+    ///             <p>
+    ///                 The server has encountered an internal error and can not process
+    ///                 your request at this time. Please try again later or contact us
+    ///                 at <pre>help@example.com</pre>.
+    ///             </p>
+    ///         </body>
+    ///         </html>
+    ///     "#;
+    ///
+    ///     Ok(Response::builder()
+    ///         .status(StatusCode::INTERNAL_SERVER_ERROR)
+    ///         .header("Content-Type", "text/html")
+    ///         .body(Body::from(message))
+    ///         .expect("couldn't build response"))
+    /// }).make_service_by_cloning();
+    ///
+    /// let server = Server::bind(&"127.0.0.1:0".parse().unwrap())
+    ///     .serve(service);
+    ///
+    /// tokio::run(server.map_err(|e| {
+    ///     panic!("unexpected error: {}", e);
+    /// }));
+    /// ```
     fn catch_unwind<H, R>(self, handler: H) -> CatchUnwind<Self, R, H>
     where
         Self: Service<ResBody = Body, Error = BoxedError> + Sync,
