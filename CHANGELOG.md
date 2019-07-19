@@ -12,6 +12,8 @@
 * Pass the request as a `&Arc<Request<_>>` ([#19]).
 * The original request is now passed to the service closure when using
   `SyncService` or `AsyncService` ([#20]).
+* Add a `ServiceExt` trait, which offers a convenient way of catching panics in
+  the App ([#25](https://github.com/dac-gmbh/hyperdrive/pull/25)).
 
 ### Other Changes
 
