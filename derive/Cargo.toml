@@ -10,7 +10,7 @@ may break at any time. Use `hyperdrive` directly instead.
 """
 documentation = "https://docs.rs/hyperdrive/"
 repository = "https://github.com/1aim/hyperdrive.git"
-license = "CC0-1.0"
+license = "0BSD"
 edition = "2018"
 
 [lib]
