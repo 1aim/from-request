@@ -35,7 +35,6 @@ enum Route {
 
     #[get("/users/{id}")]
     User {
-        /// Taken from request path
         id: u32,
     },
 
