@@ -821,7 +821,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "synstructure does not handle untagged unions")]
+    #[should_panic(expected = "unexpected unsupported untagged union")]
     // FIXME bad error message
     fn on_union() {
         expand! {
