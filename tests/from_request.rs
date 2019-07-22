@@ -2,7 +2,7 @@ use hyperdrive::{
     body::Json,
     http::{Method, Request, StatusCode},
     hyper::Body,
-    BoxedError, Error, ErrorKind, FromRequest, Guard, NoContext, RequestContext,
+    BoxedError, Error, FromRequest, Guard, NoContext, RequestContext,
 };
 use serde::Deserialize;
 use std::str::FromStr;
@@ -114,7 +114,7 @@ fn user_app() {
 
     let get_login = invoke::<Routes>(Request::get("/login").body(Body::empty()).unwrap());
     let error: Box<Error> = get_login.unwrap_err().downcast().unwrap();
-    assert_eq!(error.kind(), ErrorKind::WrongMethod);
+    assert_eq!(error.http_status(), StatusCode::METHOD_NOT_ALLOWED);
     assert_eq!(
         error.allowed_methods().expect("allowed_methods()"),
         &[&Method::POST]
@@ -122,7 +122,7 @@ fn user_app() {
 
     let post_user = invoke::<Routes>(Request::post("/users/0").body(Body::empty()).unwrap());
     let error: Box<Error> = post_user.unwrap_err().downcast().unwrap();
-    assert_eq!(error.kind(), ErrorKind::WrongMethod);
+    assert_eq!(error.http_status(), StatusCode::METHOD_NOT_ALLOWED);
     assert_eq!(
         error.allowed_methods().expect("allowed_methods()"),
         &[&Method::GET, &Method::PATCH, &Method::HEAD]
@@ -130,7 +130,6 @@ fn user_app() {
 
     let user = invoke::<Routes>(Request::get("/users/wrong").body(Body::empty()).unwrap());
     let error: Box<Error> = user.unwrap_err().downcast().unwrap();
-    assert_eq!(error.kind(), ErrorKind::PathSegment);
     assert_eq!(error.http_status(), StatusCode::NOT_FOUND);
 }
 
@@ -626,7 +625,7 @@ fn forward_allowed_methods() {
         .unwrap_err()
         .downcast()
         .unwrap();
-    assert_eq!(err.kind(), ErrorKind::WrongMethod);
+    assert_eq!(err.http_status(), StatusCode::METHOD_NOT_ALLOWED);
     assert_eq!(
         err.allowed_methods().expect("allowed_methods()"),
         &[&Method::POST]
@@ -637,7 +636,7 @@ fn forward_allowed_methods() {
             .unwrap_err()
             .downcast()
             .unwrap();
-    assert_eq!(err.kind(), ErrorKind::WrongMethod);
+    assert_eq!(err.http_status(), StatusCode::METHOD_NOT_ALLOWED);
     assert_eq!(
         err.allowed_methods().expect("allowed_methods()"),
         &[&Method::GET, &Method::HEAD]
@@ -661,7 +660,7 @@ fn forward_allowed_methods() {
         .unwrap_err()
         .downcast()
         .unwrap();
-    assert_eq!(err.kind(), ErrorKind::WrongMethod);
+    assert_eq!(err.http_status(), StatusCode::METHOD_NOT_ALLOWED);
     assert_eq!(
         err.allowed_methods().expect("allowed_methods()"),
         &[&Method::GET, &Method::HEAD, &Method::POST]
@@ -743,14 +742,14 @@ fn generic_guard_struct() {
             .unwrap_err()
             .downcast()
             .unwrap();
-    assert_eq!(err.kind(), ErrorKind::NoMatchingRoute);
+    assert_eq!(err.http_status(), StatusCode::NOT_FOUND);
 
     let err: Box<Error> =
         invoke::<Generic<MyGuard, Inner>>(Request::post("/").body(Body::empty()).unwrap())
             .unwrap_err()
             .downcast()
             .unwrap();
-    assert_eq!(err.kind(), ErrorKind::WrongMethod);
+    assert_eq!(err.http_status(), StatusCode::METHOD_NOT_ALLOWED);
 }
 
 #[test]
@@ -773,14 +772,14 @@ fn generic_guard_struct_2() {
             .unwrap_err()
             .downcast()
             .unwrap();
-    assert_eq!(err.kind(), ErrorKind::NoMatchingRoute);
+    assert_eq!(err.http_status(), StatusCode::NOT_FOUND);
 
     let err: Box<Error> =
         invoke::<Generic<MyGuard>>(Request::post("/").body(Body::empty()).unwrap())
             .unwrap_err()
             .downcast()
             .unwrap();
-    assert_eq!(err.kind(), ErrorKind::WrongMethod);
+    assert_eq!(err.http_status(), StatusCode::METHOD_NOT_ALLOWED);
 }
 
 /// Keeps another `Arc` around pointing to the request, while the `#[forward]`ed `from_request` is
