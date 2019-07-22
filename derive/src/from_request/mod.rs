@@ -279,12 +279,12 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
 
                                 let future = #construct;
                                 let future = future.map_err(move |mut e| {
-                                    use hyperdrive::{Error, ErrorKind};
+                                    use hyperdrive::{Error, http::StatusCode};
 
                                     // If the #[forward]ed impl also failed with "wrong_method", add
                                     // our accepted methods to it.
                                     if let Some(err) = e.downcast_mut::<Error>() {
-                                        if err.kind() == ErrorKind::WrongMethod {
+                                        if err.http_status() == StatusCode::METHOD_NOT_ALLOWED {
                                             let request = tmp_request;
                                             let mut our_methods = Vec::from(#find_accepted_methods);
                                             let inner_methods = err.allowed_methods()
@@ -332,7 +332,7 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
         // No fallback route, add an error arm
         regex_match_arms.push(quote! {
             _ => {
-                return Error::from_kind(ErrorKind::NoMatchingRoute).into_future();
+                return Error::from_status(StatusCode::NOT_FOUND).into_future();
             }
         });
     }
@@ -411,9 +411,8 @@ pub fn derive_from_request(mut s: Structure<'_>) -> TokenStream {
     s.gen_impl(quote!(
         extern crate hyperdrive;
         use hyperdrive::{
-            FromBody, FromRequest, Guard, DefaultFuture, NoContext,
-            ErrorKind, BoxedError, Error,
-            http, hyper, lazy_static, regex::{RegexSet, Regex},
+            FromBody, FromRequest, Guard, DefaultFuture, NoContext, BoxedError, Error,
+            http::{self, StatusCode}, hyper, lazy_static, regex::{RegexSet, Regex},
             futures::{IntoFuture, Future},
         };
         // Make sure `.as_ref()` always refers to the `AsRef` trait in libstd.
@@ -692,7 +691,10 @@ fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStre
                                 .as_str();
                             let #variable = match <#ty as FromStr>::from_str(#variable) {
                                 Ok(v) => v,
-                                Err(e) => return Error::with_source(ErrorKind::PathSegment, e).into_future(),
+                                Err(e) => {
+                                    return Error::with_source(StatusCode::NOT_FOUND, e)
+                                        .into_future();
+                                }
                             };
                         }
                     })
@@ -725,7 +727,7 @@ fn construct_variant(variant: &VariantInfo<'_>, data: &VariantData) -> TokenStre
             let raw_query = request.uri().query().unwrap_or("");
             let #variable = match serde_urlencoded::from_str::<#ty>(raw_query) {
                 Ok(val) => val,
-                Err(e) => return Error::with_source(ErrorKind::QueryParam, e).into_future(),
+                Err(e) => return Error::with_source(StatusCode::BAD_REQUEST, e).into_future(),
             };
         }
     } else {
