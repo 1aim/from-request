@@ -24,3 +24,9 @@ quote = "0.6.11"
 regex-syntax = "0.6.5"
 regex = "1.1.0"
 indexmap = "1.0.2"
+
+[package.metadata.release]
+disable-tag = true  # internal crate needs no git tags
+disable-push = true  # things are pushed when Hyperdrive itself is updated
+no-dev-version = true
+pre-release-commit-message = "Hyperderive {{version}}"
