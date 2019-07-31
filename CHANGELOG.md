@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+No changes.
+
+## 0.2.0 - 2019-07-31
+
 ### Breaking Changes
 
 * The signature of `from_request` was changed to pass the request differently.
