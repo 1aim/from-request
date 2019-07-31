@@ -15,6 +15,13 @@ incoming requests depending on the method and path.
 Please refer to the [changelog](CHANGELOG.md) to see what changed in the last
 releases.
 
+## Rust Version Policy
+
+Hyperdrive supports the latest stable Rust release, as well as the 2 stable
+releases before that. As long as these 3 Rust versions are still supported,
+bumping the minimum supported Rust version (MSRV) is not considered a breaking
+change.
+
 ## Example
 
 This example shows how to use Hyperdrive to define routes for a simple
