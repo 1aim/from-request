@@ -17,7 +17,7 @@
 
 ### Other Changes
 
-* Hyperdrive is now licensed under the [0BSD] license
+* Hyperdrive is now licensed under the [0BSD] license.
 
 [#19]: https://github.com/dac-gmbh/hyperdrive/issues/19
 [#20]: https://github.com/dac-gmbh/hyperdrive/issues/20
