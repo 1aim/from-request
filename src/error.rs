@@ -125,7 +125,7 @@ impl Error {
             let allowed = self
                 .allowed_methods
                 .iter()
-                .map(|method| method.as_str().to_uppercase())
+                .map(|method| method.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
             builder.header(http::header::ALLOW, allowed);
