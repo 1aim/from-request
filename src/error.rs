@@ -97,6 +97,19 @@ impl Error {
         self.status
     }
 
+    /// Returns the original cause of this error.
+    ///
+    /// If no source was provided when `self` was created, returns `None`.
+    ///
+    /// This is equivalent to the method `std::error::Error::source`, but does
+    /// not require the caller to import the `std::error::Error` trait.
+    pub fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match &self.source {
+            Some(source) => Some(&**source),
+            None => None,
+        }
+    }
+
     /// Creates an HTTP response for indicating this error to the client.
     ///
     /// No body will be provided (hence the `()` body type), but the caller can
