@@ -608,17 +608,15 @@ where
             Err(panic_payload) => return Box::new(handler(panic_payload).into_future()),
         };
 
-        Box::new(AssertUnwindSafe(inner_future)
-            .catch_unwind()
-            .then(move |panic_result| -> Box<dyn Future<Item=Response<Body>, Error = BoxedError>
-            + Send> {
+        Box::new(AssertUnwindSafe(inner_future).catch_unwind().then(
+            move |panic_result| -> DefaultFuture<Response<Body>, BoxedError> {
                 match panic_result {
                     // FIXME avoid boxing so much here
                     Ok(result) => Box::new(result.into_future()),
                     Err(panic_payload) => Box::new(handler(panic_payload).into_future()),
                 }
-            }),
-        )
+            },
+        ))
     }
 }
 
