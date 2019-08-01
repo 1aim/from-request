@@ -534,7 +534,7 @@ pub trait FromRequest: Sized {
     ///
     /// Implementations of this function must not block, since this function is
     /// always run on a futures executor. If you need to perform blocking I/O or
-    /// long-running computations, you can call [`tokio_threadpool::blocking`].
+    /// long-running computations, you can call [`hyperdrive::blocking`].
     ///
     /// # Parameters
     ///
@@ -542,7 +542,7 @@ pub trait FromRequest: Sized {
     /// * **`body`**: The streamed HTTP body.
     /// * **`context`**: The user-defined context.
     ///
-    /// [`tokio_threadpool::blocking`]: ../tokio_threadpool/fn.blocking.html
+    /// [`hyperdrive::blocking`]: fn.blocking.html
     fn from_request_and_body(
         request: &Arc<http::Request<()>>,
         body: hyper::Body,
@@ -555,7 +555,7 @@ pub trait FromRequest: Sized {
     ///
     /// Implementations of this function must not block, since this function is
     /// always run on a futures executor. If you need to perform blocking I/O or
-    /// long-running computations, you can call [`tokio_threadpool::blocking`].
+    /// long-running computations, you can call [`hyperdrive::blocking`].
     ///
     /// A blocking wrapper around this method is provided by
     /// [`from_request_sync`].
@@ -567,7 +567,7 @@ pub trait FromRequest: Sized {
     /// * **`context`**: User-defined context.
     ///
     /// [`from_request_sync`]: #method.from_request_sync
-    /// [`tokio_threadpool::blocking`]: ../tokio_threadpool/fn.blocking.html
+    /// [`hyperdrive::blocking`]: fn.blocking.html
     fn from_request(request: http::Request<hyper::Body>, context: Self::Context) -> Self::Future {
         let (parts, body) = request.into_parts();
         let request = Arc::new(http::Request::from_parts(parts, ()));
@@ -693,21 +693,20 @@ pub trait Guard: Sized {
     /// Create an instance of this type from HTTP request data, asynchronously.
     ///
     /// This can inspect HTTP headers and other data provided by
-    /// [`http::Request`], but can not access the body of the request. If access
+    /// `http::Request`, but can not access the body of the request. If access
     /// to the body is needed, [`FromBody`] must be implemented instead.
     ///
     /// Implementations of this function must not block, since this function is
     /// always run on a futures executor. If you need to perform blocking I/O or
-    /// long-running computations, you can call [`tokio_threadpool::blocking`].
+    /// long-running computations, you can call [`hyperdrive::blocking`].
     ///
     /// # Parameters
     ///
     /// * **`request`**: An HTTP request (without body) from the `http` crate.
     /// * **`context`**: User-defined context needed by the guard.
     ///
-    /// [`http::Request`]: ../http/request/struct.Request.html
     /// [`FromBody`]: trait.FromBody.html
-    /// [`tokio_threadpool::blocking`]: ../tokio_threadpool/fn.blocking.html
+    /// [`hyperdrive::blocking`]: fn.blocking.html
     fn from_request(request: &Arc<http::Request<()>>, context: &Self::Context) -> Self::Result;
 }
 
@@ -816,7 +815,7 @@ pub trait FromBody: Sized {
     ///
     /// Implementations of this function must not block, since this function is
     /// always run on a futures executor. If you need to perform blocking I/O or
-    /// long-running computations, you can call [`tokio_threadpool::blocking`].
+    /// long-running computations, you can call [`hyperdrive::blocking`].
     ///
     /// **Note**: You probably want to limit the size of the body to prevent
     /// denial of service attacks.
@@ -828,7 +827,7 @@ pub trait FromBody: Sized {
     /// * **`context`**: User-defined context.
     ///
     /// [`Guard`]: trait.Guard.html
-    /// [`tokio_threadpool::blocking`]: ../tokio_threadpool/fn.blocking.html
+    /// [`hyperdrive::blocking`]: fn.blocking.html
     fn from_body(
         request: &Arc<http::Request<()>>,
         body: hyper::Body,
@@ -915,9 +914,7 @@ impl AsRef<NoContext> for NoContext {
 /// The returned future will have `'static` lifetime if the passed closure and
 /// the success and error types do.
 ///
-/// This is a convenience wrapper around [`tokio_threadpool::blocking`].
-///
-/// [`tokio_threadpool::blocking`]: ../tokio_threadpool/fn.blocking.html
+/// This is a convenience wrapper around `tokio_threadpool::blocking`.
 pub fn blocking<F, T, E>(f: F) -> impl Future<Item = T, Error = E>
 where
     F: FnOnce() -> Result<T, E>,
