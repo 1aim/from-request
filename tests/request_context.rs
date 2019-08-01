@@ -17,7 +17,7 @@ fn unit() {
 #[test]
 fn empty() {
     #[derive(RequestContext)]
-    struct Empty;
+    struct Empty {}
 
     assert_impls::<Empty>();
 }
