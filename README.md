@@ -26,7 +26,7 @@ change.
 
 This example shows how to use Hyperdrive to define routes for a simple
 webservice and how to spin up a hyper server that will serve these routes with a
-user-provided sync handler:
+user-provided (synchronous) request handler:
 
 ```rust
 use hyperdrive::{FromRequest, body::Json, service::SyncService};
