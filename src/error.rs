@@ -5,7 +5,10 @@ use std::{borrow::Cow, error, fmt};
 
 /// The error type used by the Hyperdrive library.
 ///
-/// This type can be turned into an HTTP response and sent back to a client.
+/// This type can be turned into an HTTP response by calling [`Error::response`]
+/// and then sent back to the client.
+///
+/// [`Error::response`]: #method.response
 #[derive(Debug)]
 pub struct Error {
     status: StatusCode,
@@ -48,18 +51,44 @@ impl Error {
     /// caused this one.
     ///
     /// Responding with the returned `Error` will not send a response body back
-    /// to the client.
+    /// to the client. Refer to the examples for how to include one.
     ///
     /// # Parameters
     ///
     /// * **`status`**: The HTTP `StatusCode` describing the error.
-    /// * **`source`**: The underlying error that caused this one. Any type
-    ///   implementing `std::error::Error + Send + Sync` can be passed here.
+    /// * **`source`**: The underlying error that caused this one. Any type that
+    ///   can be converted to a boxed error can be passed here.
     ///
     /// # Panics
     ///
     /// This will panic when called with a `status` that does not indicate a
     /// client or server error.
+    ///
+    /// # Examples
+    ///
+    /// The source can be a `&str` or `String`:
+    ///
+    /// ```
+    /// use hyperdrive::Error;
+    /// use http::StatusCode;
+    ///
+    /// let err = Error::with_source(StatusCode::NOT_FOUND, "file not found");
+    /// ```
+    ///
+    /// The source will be displayed when the `hyperdrive::Error` is displayed,
+    /// and can be used as the body of the response sent to the client:
+    ///
+    /// ```
+    /// use hyperdrive::Error;
+    /// use http::StatusCode;
+    /// use hyper::Body;
+    ///
+    /// let err = Error::with_source(StatusCode::NOT_FOUND, "file not found");
+    /// let response = err.response()
+    ///     .map(|()| Body::from(err.to_string()));
+    ///
+    /// // response now has a body containing "file not found"
+    /// ```
     pub fn with_source<S>(status: StatusCode, source: S) -> Self
     where
         S: Into<BoxedError>,
@@ -128,6 +157,21 @@ impl Error {
     /// let response = error.response()
     ///     .map(|()| Body::from("oh no!"));
     /// ```
+    ///
+    /// Call `map` on the response to provide information about the underlying
+    /// error:
+    ///
+    /// ```
+    /// use hyperdrive::Error;
+    /// use http::StatusCode;
+    /// use hyper::Body;
+    ///
+    /// let err = Error::with_source(StatusCode::NOT_FOUND, "file not found");
+    /// let response = err.response()
+    ///     .map(|()| Body::from(err.to_string()));
+    ///
+    /// // response now has a body containing "file not found"
+    /// ```
     pub fn response(&self) -> http::Response<()> {
         let mut builder = http::Response::builder();
         builder.status(self.http_status());
@@ -182,9 +226,6 @@ impl fmt::Display for Error {
 
 impl error::Error for Error {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        match &self.source {
-            Some(source) => Some(&**source),
-            None => None,
-        }
+        self.source()
     }
 }
